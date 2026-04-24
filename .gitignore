@@ -19,6 +19,9 @@ src-tauri/gen
 # Claude Code
 .claude
 
+# Raw font archives — usable copies live under public/fonts/
+/fonts
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
