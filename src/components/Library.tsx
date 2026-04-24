@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { BookCover } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
 import {
+  clearLibrary,
   coverSrcFor,
   listBooks,
   pickAndImportEpub,
@@ -87,6 +88,28 @@ export function Library({ theme, layout, onOpen }: Props) {
     }
   };
 
+  const onClearAll = async () => {
+    if (importing) return;
+    const n = books.length;
+    if (n === 0) {
+      showToast("info", "Library is already empty.");
+      return;
+    }
+    if (!confirm(`[dev] Delete all ${n} book${n === 1 ? "" : "s"}? This cannot be undone.`))
+      return;
+    setImporting(true);
+    setError(null);
+    try {
+      await clearLibrary();
+      await refresh();
+      showToast("info", `Cleared ${n} book${n === 1 ? "" : "s"}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const onImportFolder = async () => {
     if (importing) return;
     setImporting(true);
@@ -162,6 +185,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         onOpen={onOpen}
         onImport={onImport}
         onImportFolder={onImportFolder}
+        onClearAll={onClearAll}
         onDelete={onDelete}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
@@ -177,6 +201,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         onOpen={onOpen}
         onImport={onImport}
         onImportFolder={onImportFolder}
+        onClearAll={onClearAll}
         onDelete={onDelete}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
@@ -201,6 +226,7 @@ interface LayoutProps {
   onOpen: (id: string) => void;
   onImport: () => void;
   onImportFolder: () => void;
+  onClearAll: () => void;
   onDelete: (id: string) => void;
   onRescanCover: (id: string) => void;
   onSetCover: (id: string) => void;
@@ -216,6 +242,7 @@ function DesktopLibrary({
   onOpen,
   onImport,
   onImportFolder,
+  onClearAll,
   onDelete,
   onRescanCover,
   onSetCover,
@@ -280,6 +307,32 @@ function DesktopLibrary({
           ))}
         </div>
         <div style={{ flex: 1 }} />
+        {import.meta.env.DEV && (
+          <button
+            onClick={onClearAll}
+            disabled={importing}
+            title="Dev only — wipes every book from the library"
+            style={{
+              padding: "7px 14px",
+              background: "transparent",
+              color: "#c04a3a",
+              border: "0.5px solid #c04a3a",
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: importing ? "progress" : "pointer",
+              fontFamily: FONT_STACKS.sans,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginRight: 8,
+              opacity: importing ? 0.6 : 1,
+            }}
+          >
+            <Icon name="close" size={13} />
+            Clear all
+          </button>
+        )}
         <button
           onClick={onImportFolder}
           disabled={importing}
@@ -417,6 +470,7 @@ function MobileLibrary({
   onOpen,
   onImport,
   onImportFolder,
+  onClearAll,
 }: LayoutProps) {
   // `onRescanCover`/`onSetCover` arrive in LayoutProps but mobile's compact
   // cards don't expose them yet — long-press menu is a TODO.
@@ -462,6 +516,29 @@ function MobileLibrary({
           Library
         </h1>
         <div style={{ display: "flex", gap: 8 }}>
+          {import.meta.env.DEV && (
+            <button
+              onClick={onClearAll}
+              disabled={importing}
+              aria-label="Clear library (dev)"
+              title="Dev only — wipes every book"
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                border: "0.5px solid #c04a3a",
+                background: "transparent",
+                color: "#c04a3a",
+                cursor: importing ? "progress" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: importing ? 0.6 : 1,
+              }}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          )}
           <button
             onClick={onImportFolder}
             disabled={importing}

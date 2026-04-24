@@ -392,6 +392,27 @@ export async function coverSrcFor(
   return `${convertFileSrc(abs)}?v=${v}`;
 }
 
+/**
+ * Dev-only nuke: remove every book from the index and wipe the books/
+ * directory. Useful while iterating on the parser or UI. Called from a
+ * dev-mode button in the Library header.
+ */
+export async function clearLibrary(): Promise<void> {
+  const idx = await readIndex();
+  for (const b of idx.books) {
+    try {
+      const entries = await readDir(bookDir(b.id), { baseDir: BASE });
+      for (const e of entries) {
+        await remove(`${bookDir(b.id)}/${e.name}`, { baseDir: BASE });
+      }
+      await remove(bookDir(b.id), { baseDir: BASE });
+    } catch {
+      // best-effort — a missing dir shouldn't stop the sweep
+    }
+  }
+  await writeIndex({ version: 1, books: [] });
+}
+
 export async function deleteBook(id: string): Promise<void> {
   const idx = await readIndex();
   idx.books = idx.books.filter((b) => b.id !== id);
