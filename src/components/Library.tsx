@@ -816,7 +816,12 @@ function HeroContinueCard({
             fontStyle: "italic",
             fontWeight: 400,
             fontSize: 44,
-            lineHeight: 1.05,
+            // Generous line-height so Arabic descenders (dots below ب, ج, ي…)
+            // aren't clipped by overflow: hidden. 1.05 was fine for Latin-only
+            // but cut off the bottom of Arabic glyphs after the Readex Pro
+            // switch.
+            lineHeight: 1.3,
+            paddingBottom: 4,
             margin: "0 0 4px",
             letterSpacing: "-0.02em",
             color: theme.ink,
