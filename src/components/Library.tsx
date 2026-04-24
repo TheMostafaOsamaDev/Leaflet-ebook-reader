@@ -264,6 +264,7 @@ function DesktopLibrary({
                 book={hero}
                 coverSrc={covers[hero.id]}
                 onOpen={() => onOpen(hero.id)}
+                onDelete={() => onDelete(hero.id)}
                 onRescanCover={() => onRescanCover(hero.id)}
                 onSetCover={() => onSetCover(hero.id)}
               />
@@ -568,6 +569,7 @@ function HeroContinueCard({
   book,
   coverSrc,
   onOpen,
+  onDelete,
   onRescanCover,
   onSetCover,
 }: {
@@ -575,6 +577,7 @@ function HeroContinueCard({
   book: BookIndexEntry;
   coverSrc?: string;
   onOpen: () => void;
+  onDelete: () => void;
   onRescanCover: () => void;
   onSetCover: () => void;
 }) {
@@ -683,24 +686,51 @@ function HeroContinueCard({
               {Math.round(book.progress * 100)}% · {relTime(book.lastReadAt ?? book.addedAt)}
             </div>
           </div>
-          <button
-            onClick={onOpen}
+          <div
             style={{
               marginTop: 16,
-              padding: "10px 20px",
-              background: theme.ink,
-              color: theme.bg,
-              border: "none",
-              borderRadius: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: FONT_STACKS.sans,
-              letterSpacing: "-0.01em",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
             }}
           >
-            {book.lastReadAt ? "Resume reading →" : "Start reading →"}
-          </button>
+            <button
+              onClick={onOpen}
+              style={{
+                padding: "10px 20px",
+                background: theme.ink,
+                color: theme.bg,
+                border: "none",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: FONT_STACKS.sans,
+                letterSpacing: "-0.01em",
+              }}
+            >
+              {book.lastReadAt ? "Resume reading →" : "Start reading →"}
+            </button>
+            <button
+              onClick={() => {
+                if (confirm(`Remove “${book.title}” from your library?`))
+                  onDelete();
+              }}
+              style={{
+                padding: "10px 14px",
+                background: "transparent",
+                color: theme.muted,
+                border: "none",
+                borderRadius: 8,
+                fontSize: 12.5,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: FONT_STACKS.sans,
+              }}
+            >
+              Remove from library
+            </button>
+          </div>
         </div>
       </div>
     </div>
