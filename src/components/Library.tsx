@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Icon } from "./Icon";
 import { BookCover } from "./BookCover";
+import { Toast, type ToastMessage } from "./Toast";
 import {
   coverSrcFor,
   listBooks,
   pickAndImportEpub,
+  pickAndImportFolder,
   deleteBook,
   rescanCover,
   setCoverFromFile,
@@ -63,6 +65,13 @@ function useBooks() {
 export function Library({ theme, layout, onOpen }: Props) {
   const { books, covers, loading, error, refresh, setError } = useBooks();
   const [importing, setImporting] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const toastIdRef = useRef(0);
+
+  const showToast = useCallback((kind: ToastMessage["kind"], text: string) => {
+    toastIdRef.current += 1;
+    setToast({ id: toastIdRef.current, kind, text });
+  }, []);
 
   const onImport = async () => {
     if (importing) return;
@@ -71,6 +80,41 @@ export function Library({ theme, layout, onOpen }: Props) {
     try {
       const entry = await pickAndImportEpub();
       if (entry) await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const onImportFolder = async () => {
+    if (importing) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const result = await pickAndImportFolder();
+      if (!result) return;
+      if (result.empty) {
+        showToast(
+          "warn",
+          "That folder has no EPUB files at its top level — can't import an empty folder.",
+        );
+        return;
+      }
+      await refresh();
+      const n = result.imported.length;
+      const skipped = result.errors.length;
+      if (skipped > 0) {
+        showToast(
+          "warn",
+          `Imported ${n} book${n === 1 ? "" : "s"}, skipped ${skipped} that couldn't be parsed.`,
+        );
+      } else {
+        showToast(
+          "info",
+          `Imported ${n} book${n === 1 ? "" : "s"}.`,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -106,8 +150,8 @@ export function Library({ theme, layout, onOpen }: Props) {
     }
   };
 
-  if (layout === "mobile")
-    return (
+  const layoutEl =
+    layout === "mobile" ? (
       <MobileLibrary
         theme={theme}
         books={books}
@@ -117,6 +161,22 @@ export function Library({ theme, layout, onOpen }: Props) {
         importing={importing}
         onOpen={onOpen}
         onImport={onImport}
+        onImportFolder={onImportFolder}
+        onDelete={onDelete}
+        onRescanCover={onRescanCover}
+        onSetCover={onSetCover}
+      />
+    ) : (
+      <DesktopLibrary
+        theme={theme}
+        books={books}
+        covers={covers}
+        loading={loading}
+        error={error}
+        importing={importing}
+        onOpen={onOpen}
+        onImport={onImport}
+        onImportFolder={onImportFolder}
         onDelete={onDelete}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
@@ -124,19 +184,10 @@ export function Library({ theme, layout, onOpen }: Props) {
     );
 
   return (
-    <DesktopLibrary
-      theme={theme}
-      books={books}
-      covers={covers}
-      loading={loading}
-      error={error}
-      importing={importing}
-      onOpen={onOpen}
-      onImport={onImport}
-      onDelete={onDelete}
-      onRescanCover={onRescanCover}
-      onSetCover={onSetCover}
-    />
+    <>
+      {layoutEl}
+      <Toast theme={theme} toast={toast} onDismiss={() => setToast(null)} />
+    </>
   );
 }
 
@@ -149,6 +200,7 @@ interface LayoutProps {
   importing: boolean;
   onOpen: (id: string) => void;
   onImport: () => void;
+  onImportFolder: () => void;
   onDelete: (id: string) => void;
   onRescanCover: (id: string) => void;
   onSetCover: (id: string) => void;
@@ -163,6 +215,7 @@ function DesktopLibrary({
   importing,
   onOpen,
   onImport,
+  onImportFolder,
   onDelete,
   onRescanCover,
   onSetCover,
@@ -223,6 +276,29 @@ function DesktopLibrary({
           ))}
         </div>
         <div style={{ flex: 1 }} />
+        <button
+          onClick={onImportFolder}
+          disabled={importing}
+          style={{
+            padding: "7px 14px",
+            background: "transparent",
+            color: theme.ink,
+            border: `0.5px solid ${theme.rule}`,
+            borderRadius: 8,
+            fontSize: 12.5,
+            fontWeight: 500,
+            cursor: importing ? "progress" : "pointer",
+            fontFamily: FONT_STACKS.sans,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            marginRight: 8,
+            opacity: importing ? 0.6 : 1,
+          }}
+        >
+          <Icon name="plus" size={13} />
+          Import folder
+        </button>
         <button
           onClick={onImport}
           disabled={importing}
@@ -336,6 +412,7 @@ function MobileLibrary({
   importing,
   onOpen,
   onImport,
+  onImportFolder,
 }: LayoutProps) {
   // `onRescanCover`/`onSetCover` arrive in LayoutProps but mobile's compact
   // cards don't expose them yet — long-press menu is a TODO.
@@ -376,26 +453,48 @@ function MobileLibrary({
         >
           Library
         </h1>
-        <button
-          onClick={onImport}
-          disabled={importing}
-          aria-label="Import EPUB"
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            border: "none",
-            background: theme.ink,
-            color: theme.bg,
-            cursor: importing ? "progress" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: importing ? 0.6 : 1,
-          }}
-        >
-          <Icon name="plus" size={16} />
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onImportFolder}
+            disabled={importing}
+            aria-label="Import folder of EPUBs"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              border: `0.5px solid ${theme.rule}`,
+              background: "transparent",
+              color: theme.ink,
+              cursor: importing ? "progress" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: importing ? 0.6 : 1,
+            }}
+          >
+            <Icon name="folder" size={16} />
+          </button>
+          <button
+            onClick={onImport}
+            disabled={importing}
+            aria-label="Import EPUB"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              border: "none",
+              background: theme.ink,
+              color: theme.bg,
+              cursor: importing ? "progress" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: importing ? 0.6 : 1,
+            }}
+          >
+            <Icon name="plus" size={16} />
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "0 22px 40px" }}>
