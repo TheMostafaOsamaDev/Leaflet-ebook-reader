@@ -220,8 +220,12 @@ function DesktopLibrary({
   onRescanCover,
   onSetCover,
 }: LayoutProps) {
-  const hero = books[0];
-  const others = books.slice(1);
+  // Hero is the actually-last-read book, not the one most-recently-added.
+  // `listBooks()` already sorts read books above unread by lastReadAt, so
+  // the first entry with lastReadAt defined is the right pick. If no book
+  // has been opened yet, there's no hero — everything lands on the shelf.
+  const hero = books.find((b) => b.lastReadAt !== undefined);
+  const others = hero ? books.filter((b) => b.id !== hero.id) : books;
 
   return (
     <div
@@ -416,8 +420,12 @@ function MobileLibrary({
 }: LayoutProps) {
   // `onRescanCover`/`onSetCover` arrive in LayoutProps but mobile's compact
   // cards don't expose them yet — long-press menu is a TODO.
-  const hero = books[0];
-  const others = books.slice(1);
+  // Hero is the actually-last-read book, not the one most-recently-added.
+  // `listBooks()` already sorts read books above unread by lastReadAt, so
+  // the first entry with lastReadAt defined is the right pick. If no book
+  // has been opened yet, there's no hero — everything lands on the shelf.
+  const hero = books.find((b) => b.lastReadAt !== undefined);
+  const others = hero ? books.filter((b) => b.id !== hero.id) : books;
 
   return (
     <div
