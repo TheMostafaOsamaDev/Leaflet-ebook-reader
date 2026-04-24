@@ -3,6 +3,18 @@
    the same palette can drive per-surface overrides. The :root vars here are
    shared primitives only. */
 
+/* Readex Pro — single variable file covers weights 200–700 and both Latin
+   and Arabic scripts. Self-hosted from /public/fonts so the app works
+   offline (matters for Tauri builds). */
+@font-face {
+  font-family: "Readex Pro";
+  src: url("/fonts/ReadexPro-Variable.ttf") format("truetype-variations"),
+       url("/fonts/ReadexPro-Variable.ttf") format("truetype");
+  font-weight: 200 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -18,7 +30,7 @@ body,
 }
 
 body {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+  font-family: "Readex Pro", -apple-system, BlinkMacSystemFont, "Segoe UI",
     system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

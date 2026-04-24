@@ -92,14 +92,19 @@ export function hlBg(color: HighlightColor, themeKey: ThemeKey): string {
 
 export type FontFamilyKey = "serif" | "sans" | "dyslexic";
 
+// UI sans is Readex Pro — a variable Latin+Arabic family, so Arabic glyphs
+// render in the same family instead of falling through to an OS default.
+// Serif reading/display stacks still list Readex Pro after their Latin
+// primary so Arabic titles/body text pick it up via per-glyph fallback.
 export const FONT_STACKS: Record<FontFamilyKey, string> = {
   serif:
-    '"Literata", "Iowan Old Style", "Source Serif Pro", Georgia, serif',
-  sans: '"Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
-  dyslexic: '"Atkinson Hyperlegible", "Lexend", system-ui, sans-serif',
+    '"Literata", "Iowan Old Style", "Source Serif Pro", "Readex Pro", Georgia, serif',
+  sans: '"Readex Pro", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+  dyslexic: '"Atkinson Hyperlegible", "Lexend", "Readex Pro", system-ui, sans-serif',
 };
 
-export const FONT_SERIF_DISPLAY = '"Fraunces", "Literata", Georgia, serif';
+export const FONT_SERIF_DISPLAY =
+  '"Fraunces", "Literata", "Readex Pro", Georgia, serif';
 export const FONT_ARABIC =
   '"Amiri", "Noto Naskh Arabic", "Scheherazade New", serif';
 
