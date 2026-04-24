@@ -793,7 +793,10 @@ function HeroContinueCard({
           />
         )}
       </div>
-      <div style={{ flex: 1, paddingTop: 10, minWidth: 300 }}>
+      {/* minWidth: 0 so the title's nowrap+ellipsis clips at the flex
+          child's assigned width instead of letting the child grow to
+          accommodate the full title. */}
+      <div style={{ flex: 1, paddingTop: 10, minWidth: 0 }}>
         <div
           style={{
             fontSize: 10.5,
@@ -807,6 +810,7 @@ function HeroContinueCard({
           {book.lastReadAt ? "Continue reading" : "Start reading"}
         </div>
         <h1
+          title={book.title}
           style={{
             fontFamily: FONT_SERIF_DISPLAY,
             fontStyle: "italic",
@@ -816,8 +820,9 @@ function HeroContinueCard({
             margin: "0 0 4px",
             letterSpacing: "-0.02em",
             color: theme.ink,
-            textWrap: "balance",
-            maxWidth: 520,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
           {book.title}
