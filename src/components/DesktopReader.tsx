@@ -3,6 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import { SelectionPopover } from "./SelectionPopover";
+import { HighlightActionPopover } from "./HighlightActionPopover";
 import type { EpubBook } from "../epub/types";
 import type { BookState, Highlight } from "../store/library";
 import type { HighlightColor } from "../styles/tokens";
@@ -178,35 +179,81 @@ export function DesktopReader({
       ? Array.from({ length: chapterCount - 1 }, (_, i) => (i + 1) / chapterCount)
       : [];
 
-  // Selection-driven highlight popover. We resolve the selection on
-  // mouseup (after the browser has finalized it) and again on
-  // selectionchange (so keyboard-driven extends update the anchor in
-  // place). Dismiss when the selection collapses.
+  // Two mutually-exclusive popovers:
+  //   - selAnchor: shown when the user just finished selecting text
+  //   - activeHl: shown when the user clicked an existing highlight
+  // Showing one always clears the other.
   const [selAnchor, setSelAnchor] = useState<SelectionAnchor | null>(null);
+  const [activeHl, setActiveHl] = useState<{
+    highlight: Highlight;
+    rect: DOMRect;
+  } | null>(null);
+
+  // Resolve the selection only when the user *stops* selecting (pointerup),
+  // not while they're still dragging. selectionchange is used solely to
+  // dismiss the popover when the selection collapses (e.g. user clicks
+  // somewhere else).
   useEffect(() => {
-    const refresh = () => {
-      const next = resolveSelectionAnchor();
-      setSelAnchor((prev) => {
-        if (!next) return null;
-        if (
-          prev &&
-          prev.paragraphIndex === next.paragraphIndex &&
-          prev.charStart === next.charStart &&
-          prev.charEnd === next.charEnd
-        ) {
-          return prev;
+    const onPointerUp = () => {
+      // Defer one tick so the browser has finalized the selection.
+      window.setTimeout(() => {
+        const next = resolveSelectionAnchor();
+        if (next) {
+          setSelAnchor(next);
+          setActiveHl(null);
         }
-        return next;
-      });
+      }, 0);
     };
-    const onMouseUp = () => window.setTimeout(refresh, 0);
-    document.addEventListener("mouseup", onMouseUp);
-    document.addEventListener("selectionchange", refresh);
+    const dismissOnCollapse = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        setSelAnchor(null);
+      }
+    };
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("selectionchange", dismissOnCollapse);
     return () => {
-      document.removeEventListener("mouseup", onMouseUp);
-      document.removeEventListener("selectionchange", refresh);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("selectionchange", dismissOnCollapse);
     };
   }, []);
+
+  // Click on an existing highlight → open the action popover. Skips
+  // when a non-collapsed selection exists, because that click was
+  // really the tail of a drag-select that ended on top of a <mark>.
+  // Also dismisses both popovers when the click lands outside any
+  // highlight or popover surface.
+  const highlightById = (id: string) =>
+    state.highlights.find((h) => h.id === id);
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Clicks inside our own popovers are handled by their buttons.
+      if (target.closest('[data-popover="highlight"]')) return;
+
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+
+      const mark = target.closest<HTMLElement>("[data-h-id]");
+      if (mark && mark.dataset.hId) {
+        const h = highlightById(mark.dataset.hId);
+        if (h) {
+          setActiveHl({ highlight: h, rect: mark.getBoundingClientRect() });
+          setSelAnchor(null);
+          return;
+        }
+      }
+      // Click outside any highlight or popover — dismiss any open action.
+      setActiveHl(null);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+    // Re-bind when the highlights list changes so the closure sees the
+    // fresh array (new IDs need to resolve).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.highlights]);
+
   const dismissSelection = () => {
     setSelAnchor(null);
     window.getSelection()?.removeAllRanges();
@@ -614,6 +661,22 @@ export function DesktopReader({
           onPick={(color) => createFromSelection(color)}
           onAddNote={(color, note) => createFromSelection(color, note)}
           onDismiss={dismissSelection}
+        />
+      )}
+      {activeHl && (
+        <HighlightActionPopover
+          theme={theme}
+          highlight={activeHl.highlight}
+          anchor={activeHl.rect}
+          onDelete={() => {
+            onDeleteHighlight(activeHl.highlight.id);
+            setActiveHl(null);
+          }}
+          onUpdateNote={(note) => {
+            onUpdateHighlightNote(activeHl.highlight.id, note);
+            setActiveHl(null);
+          }}
+          onDismiss={() => setActiveHl(null)}
         />
       )}
     </div>
