@@ -15,6 +15,46 @@
   font-display: swap;
 }
 
+/* Arabic-capable reading fonts — exposed as FontFamilyKey options in the
+   reader's settings panel. Static TTFs for Lateef/Tajawal keep total
+   payload smallish while still covering the 400/700 reading weights. */
+@font-face {
+  font-family: "Cairo";
+  src: url("/fonts/reading/Cairo-Variable.ttf") format("truetype-variations"),
+       url("/fonts/reading/Cairo-Variable.ttf") format("truetype");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Lateef";
+  src: url("/fonts/reading/Lateef-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Lateef";
+  src: url("/fonts/reading/Lateef-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Tajawal";
+  src: url("/fonts/reading/Tajawal-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Tajawal";
+  src: url("/fonts/reading/Tajawal-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {

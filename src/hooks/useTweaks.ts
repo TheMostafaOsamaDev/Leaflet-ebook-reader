@@ -11,6 +11,8 @@ export const DEFAULT_TWEAKS: Tweaks = {
   letterSpacing: 0,
   textAlign: "justify",
   rtl: false,
+  columns: 2,
+  pageWidth: 900,
 };
 
 function load(): Tweaks {
