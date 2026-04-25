@@ -56,6 +56,7 @@ export function SelectionPopover({
     <div
       role="toolbar"
       aria-label="Highlight options"
+      data-popover="highlight"
       onMouseDown={(e) => {
         // Keep the underlying selection alive while the user clicks our
         // controls — without this, mousedown on the popover collapses

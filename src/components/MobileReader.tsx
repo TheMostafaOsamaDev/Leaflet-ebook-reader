@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import { MobileSheet } from "./MobileSheet";
 import { SelectionPopover } from "./SelectionPopover";
+import { HighlightActionPopover } from "./HighlightActionPopover";
 import type { EpubBook } from "../epub/types";
 import type { BookState, Highlight } from "../store/library";
 import {
@@ -140,30 +141,73 @@ export function MobileReader({
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
   };
 
-  // Selection-driven highlight popover. Touch devices fire touchend (then
-  // selectionchange when the long-press selection stabilizes) — the
-  // selectionchange listener covers both desktop drag-selects and the
-  // mobile long-press flow.
+  // Two mutually-exclusive popovers:
+  //   - selAnchor: shown when the user just finished a selection
+  //   - activeHl: shown when the user tapped an existing highlight
+  // Showing one always clears the other.
   const [selAnchor, setSelAnchor] = useState<SelectionAnchor | null>(null);
+  const [activeHl, setActiveHl] = useState<{
+    highlight: Highlight;
+    rect: DOMRect;
+  } | null>(null);
+
   useEffect(() => {
-    const refresh = () => {
-      const next = resolveSelectionAnchor();
-      setSelAnchor((prev) => {
-        if (!next) return null;
-        if (
-          prev &&
-          prev.paragraphIndex === next.paragraphIndex &&
-          prev.charStart === next.charStart &&
-          prev.charEnd === next.charEnd
-        ) {
-          return prev;
+    // pointerup covers both mouse and the iOS/Android long-press release
+    // that finalizes a touch selection. Defer one tick so the browser has
+    // settled the selection range before we read it.
+    const onPointerUp = () => {
+      window.setTimeout(() => {
+        const next = resolveSelectionAnchor();
+        if (next) {
+          setSelAnchor(next);
+          setActiveHl(null);
         }
-        return next;
-      });
+      }, 0);
     };
-    document.addEventListener("selectionchange", refresh);
-    return () => document.removeEventListener("selectionchange", refresh);
+    const dismissOnCollapse = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        setSelAnchor(null);
+      }
+    };
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("selectionchange", dismissOnCollapse);
+    return () => {
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("selectionchange", dismissOnCollapse);
+    };
   }, []);
+
+  // Tap on an existing highlight → show the action popover. Skip when
+  // a non-collapsed selection exists (the click is the tail of a
+  // drag-select that ended on the mark).
+  const highlightById = (id: string) =>
+    state.highlights.find((h) => h.id === id);
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-popover="highlight"]')) return;
+
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+
+      const mark = target.closest<HTMLElement>("[data-h-id]");
+      if (mark && mark.dataset.hId) {
+        const h = highlightById(mark.dataset.hId);
+        if (h) {
+          setActiveHl({ highlight: h, rect: mark.getBoundingClientRect() });
+          setSelAnchor(null);
+          return;
+        }
+      }
+      setActiveHl(null);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.highlights]);
+
   const dismissSelection = () => {
     setSelAnchor(null);
     window.getSelection()?.removeAllRanges();
@@ -487,6 +531,22 @@ export function MobileReader({
           onPick={(color) => createFromSelection(color)}
           onAddNote={(color, note) => createFromSelection(color, note)}
           onDismiss={dismissSelection}
+        />
+      )}
+      {activeHl && (
+        <HighlightActionPopover
+          theme={theme}
+          highlight={activeHl.highlight}
+          anchor={activeHl.rect}
+          onDelete={() => {
+            onDeleteHighlight(activeHl.highlight.id);
+            setActiveHl(null);
+          }}
+          onUpdateNote={(note) => {
+            onUpdateHighlightNote(activeHl.highlight.id, note);
+            setActiveHl(null);
+          }}
+          onDismiss={() => setActiveHl(null)}
         />
       )}
     </div>

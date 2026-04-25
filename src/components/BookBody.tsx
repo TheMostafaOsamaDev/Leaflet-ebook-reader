@@ -166,6 +166,7 @@ function renderParagraph(
             color: "inherit",
             borderRadius: 2,
             padding: "0 0.05em",
+            cursor: "pointer",
           }}
         >
           {text.slice(start, end)}
