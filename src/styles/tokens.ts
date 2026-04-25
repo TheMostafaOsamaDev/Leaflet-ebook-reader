@@ -129,6 +129,25 @@ export const FONT_FAMILY_LABELS: Record<FontFamilyKey, string> = {
 
 export const FONT_SERIF_DISPLAY =
   '"Fraunces", "Literata", "Readex Pro", Georgia, serif';
+
+// Match anything in the Arabic Unicode blocks (base, supplement, extended-A,
+// presentation forms A & B). Used to decide whether to render a book title
+// in the editorial Fraunces stack or fall back to the UI's Readex Pro so
+// digits and punctuation match the Arabic glyphs visually.
+const ARABIC_RANGE =
+  /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+
+export function isArabicTitle(title: string): boolean {
+  return ARABIC_RANGE.test(title);
+}
+
+/** Pick the right title font stack for a book whose title may be Arabic.
+ *  - Arabic / mixed: FONT_STACKS.sans (Readex Pro), so digits and Latin
+ *    punctuation interleaved with Arabic don't fall through to Fraunces.
+ *  - Pure Latin: FONT_SERIF_DISPLAY (Fraunces), the editorial display feel. */
+export function titleFontFor(title: string): string {
+  return isArabicTitle(title) ? FONT_STACKS.sans : FONT_SERIF_DISPLAY;
+}
 export const FONT_ARABIC =
   '"Amiri", "Noto Naskh Arabic", "Scheherazade New", serif';
 

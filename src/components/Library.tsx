@@ -29,6 +29,8 @@ import { paletteForId } from "../store/palette";
 import {
   FONT_SERIF_DISPLAY,
   FONT_STACKS,
+  isArabicTitle,
+  titleFontFor,
   type Theme,
 } from "../styles/tokens";
 
@@ -695,10 +697,10 @@ function MobileLibrary({
                   </div>
                   <div
                     style={{
-                      fontFamily: FONT_SERIF_DISPLAY,
-                      fontStyle: "italic",
+                      fontFamily: titleFontFor(hero.title),
+                      fontStyle: isArabicTitle(hero.title) ? "normal" : "italic",
                       fontSize: 18,
-                      lineHeight: 1.15,
+                      lineHeight: isArabicTitle(hero.title) ? 1.4 : 1.15,
                       color: theme.ink,
                       letterSpacing: "-0.01em",
                       marginBottom: 4,
@@ -767,11 +769,11 @@ function MobileLibrary({
                   />
                   <div
                     style={{
-                      fontFamily: FONT_SERIF_DISPLAY,
+                      fontFamily: titleFontFor(b.title),
                       fontSize: 12,
                       fontWeight: 500,
                       marginTop: 8,
-                      lineHeight: 1.2,
+                      lineHeight: 1.3,
                       color: theme.ink,
                       letterSpacing: "-0.005em",
                     }}
@@ -878,16 +880,19 @@ function HeroContinueCard({
         <h1
           title={book.title}
           style={{
-            fontFamily: FONT_SERIF_DISPLAY,
-            fontStyle: "italic",
+            // Arabic / mixed titles use the Readex Pro stack so digits and
+            // Latin punctuation interleaved in the title don't fall through
+            // to Fraunces and stand out as a different typeface.
+            fontFamily: titleFontFor(book.title),
+            // Italic only makes sense on Fraunces — suppress it for the
+            // Readex Pro path to avoid synthetic italic on Arabic.
+            fontStyle: isArabicTitle(book.title) ? "normal" : "italic",
             fontWeight: 400,
             fontSize: 44,
-            // Generous line-height so Arabic descenders (dots below ب, ج, ي…)
-            // aren't clipped by overflow: hidden. 1.05 was fine for Latin-only
-            // but cut off the bottom of Arabic glyphs after the Readex Pro
-            // switch.
-            lineHeight: 1.3,
-            paddingBottom: 4,
+            // Even more vertical room than 1.3 — the previous tweak still
+            // clipped the bottom dot on letters like ج at this font size.
+            lineHeight: 1.45,
+            paddingBottom: 8,
             margin: "0 0 4px",
             letterSpacing: "-0.02em",
             color: theme.ink,
@@ -962,7 +967,7 @@ function HeroContinueCard({
             </Button>
             <Button
               theme={theme}
-              variant="ghost"
+              variant="destructiveGhost"
               size="md"
               onClick={() => {
                 if (confirm(`Remove “${book.title}” from your library?`))
@@ -1028,9 +1033,9 @@ function LibraryCard({
         <div
           style={{
             marginTop: 12,
-            fontFamily: FONT_SERIF_DISPLAY,
+            fontFamily: titleFontFor(book.title),
             fontSize: 14,
-            lineHeight: 1.25,
+            lineHeight: isArabicTitle(book.title) ? 1.4 : 1.25,
             color: theme.ink,
             letterSpacing: "-0.005em",
             fontWeight: 500,
