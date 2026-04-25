@@ -205,6 +205,11 @@ export function DesktopReader({
       }, 0);
     };
     const dismissOnCollapse = () => {
+      // The note-editor textarea inside our popovers fires
+      // selectionchange on every caret movement (i.e. every keystroke),
+      // which would tear the popover down mid-typing. Skip dismissal
+      // while focus is inside any popover surface.
+      if (document.activeElement?.closest('[data-popover="highlight"]')) return;
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
         setSelAnchor(null);
