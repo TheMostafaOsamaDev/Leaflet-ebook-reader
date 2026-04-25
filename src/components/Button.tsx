@@ -12,7 +12,8 @@ export type ButtonVariant =
   | "secondary"
   | "outline"
   | "ghost"
-  | "destructive";
+  | "destructive"
+  | "destructiveGhost";
 
 export type ButtonSize = "sm" | "md";
 
@@ -80,6 +81,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     transform: interactive && pressed ? "scale(0.97)" : "scale(1)",
     width: fullWidth ? "100%" : undefined,
     userSelect: "none",
+    // Buttons should never wrap their label across lines — they're sized
+    // by content. If you need a multi-line button you're using the wrong
+    // primitive.
+    whiteSpace: "nowrap",
     ...v,
     ...style,
   };
@@ -161,6 +166,16 @@ function variantStyle(
         background: hover ? "rgba(192,74,58,0.10)" : "transparent",
         color: "#c04a3a",
         border: "0.5px solid #c04a3a",
+      };
+    case "destructiveGhost":
+      // Same red as `destructive` but no border — for inline secondary
+      // actions like 'Remove from library' on the hero card, where a
+      // bordered button would feel too heavy next to a ghost 'Edit
+      // details' sibling.
+      return {
+        background: hover ? "rgba(192,74,58,0.10)" : "transparent",
+        color: "#c04a3a",
+        border: "none",
       };
   }
 }
