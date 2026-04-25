@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import type { EpubBook } from "../epub/types";
 import type { BookState, Bookmark } from "../store/library";
-import { type Theme, type ThemeKey } from "../styles/tokens";
+import { FONT_STACKS, type Theme, type ThemeKey } from "../styles/tokens";
 import { BookmarksPanel } from "../panels/BookmarksPanel";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
 import { ProgressOverlay } from "../panels/ProgressOverlay";
@@ -103,6 +103,11 @@ export function DesktopReader({
 
   return (
     <div
+      // Force LTR on the reader chrome regardless of the user's RTL
+      // preference — only BookBody flips. Belt-and-suspenders with the
+      // App-level `dir="ltr"` so a stray nested dir cascade can't reach
+      // the header, panels, or bottom progress bar.
+      dir="ltr"
       style={{
         width: "100%",
         height: "100%",
@@ -111,7 +116,7 @@ export function DesktopReader({
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        fontFamily: '"Inter", system-ui, sans-serif',
+        fontFamily: FONT_STACKS.sans,
       }}
     >
       <div
