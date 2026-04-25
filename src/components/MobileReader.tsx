@@ -5,7 +5,7 @@ import { BookBody } from "./BookBody";
 import { MobileSheet } from "./MobileSheet";
 import type { EpubBook } from "../epub/types";
 import type { BookState, Bookmark } from "../store/library";
-import { type Theme, type ThemeKey } from "../styles/tokens";
+import { FONT_STACKS, type Theme, type ThemeKey } from "../styles/tokens";
 import { BookmarksPanel } from "../panels/BookmarksPanel";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
 import { ProgressOverlay } from "../panels/ProgressOverlay";
@@ -80,6 +80,8 @@ export function MobileReader({
 
   return (
     <div
+      // Mobile reader chrome stays LTR — RTL applies only to BookBody.
+      dir="ltr"
       style={{
         width: "100%",
         height: "100%",
@@ -89,7 +91,7 @@ export function MobileReader({
         flexDirection: "column",
         overflow: "hidden",
         position: "relative",
-        fontFamily: '"Inter", system-ui, sans-serif',
+        fontFamily: FONT_STACKS.sans,
       }}
     >
       {showChrome && (
