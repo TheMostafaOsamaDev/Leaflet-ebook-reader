@@ -268,16 +268,21 @@ export function DesktopReader({
           }}
         >
           <div
-            title={book.title}
+            title={chapter.title}
             style={{
               // Arabic / mixed titles render in Readex Pro (via the sans
               // stack) so digits and Latin punctuation interleaved with
               // Arabic share the same family. Suppress italic on Arabic
               // — Readex Pro doesn't ship an italic, and synthetic
               // italic on Arabic looks broken.
-              fontFamily: titleFontFor(book.title),
+              fontFamily: titleFontFor(chapter.title),
               fontSize: 13,
-              fontStyle: isArabicTitle(book.title) ? "normal" : "italic",
+              // Explicit line-height — Readex Pro's Arabic glyphs need
+              // more vertical room than Fraunces' Latin, and without it
+              // `overflow: hidden` (needed for the ellipsis) clips the
+              // ascenders/descenders.
+              lineHeight: 1.55,
+              fontStyle: isArabicTitle(chapter.title) ? "normal" : "italic",
               fontWeight: 500,
               color: theme.ink,
               letterSpacing: "-0.01em",
@@ -288,7 +293,7 @@ export function DesktopReader({
               textOverflow: "ellipsis",
             }}
           >
-            {book.title}
+            {chapter.title}
           </div>
           <div
             style={{
