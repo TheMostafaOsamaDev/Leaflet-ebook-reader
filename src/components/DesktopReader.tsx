@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
@@ -20,7 +20,11 @@ interface Props {
   book: EpubBook;
   state: BookState;
   currentChapter: number;
+  /** Paragraph to scroll to when the chapter mounts. Read once per chapter
+      change; live scroll position is owned by the reader itself. */
+  resumeParagraph: number;
   onChapterChange: (order: number) => void;
+  onParagraphChange: (idx: number) => void;
   onToggleBookmark: () => void;
   onDeleteBookmark: (id: string) => void;
   activePanel: ActivePanel;
@@ -51,13 +55,23 @@ export function DesktopReader({
   book,
   state,
   currentChapter,
+  resumeParagraph,
   onChapterChange,
+  onParagraphChange,
   onToggleBookmark,
   onDeleteBookmark,
   activePanel,
   setActivePanel,
   onBack,
 }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Stash the latest resumeParagraph in a ref so the chapter-change effect
+  // can read it without re-running on every paragraph save.
+  const resumeRef = useRef(resumeParagraph);
+  resumeRef.current = resumeParagraph;
+  // Same trick for onParagraphChange — keeps the scroll listener stable.
+  const onParagraphChangeRef = useRef(onParagraphChange);
+  onParagraphChangeRef.current = onParagraphChange;
   const chapter = book.chapters[currentChapter] ?? book.chapters[0];
   const chapterCount = book.chapters.length;
   const pct = chapterCount > 0
@@ -72,6 +86,50 @@ export function DesktopReader({
   const nextChapter = () => {
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
   };
+
+  // Scroll to the resume paragraph whenever the chapter changes. Runs
+  // once per chapter mount; later live scrolling doesn't trigger this
+  // because resumeParagraph isn't in the deps.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = el.querySelector<HTMLElement>(
+      `[data-p-index="${resumeRef.current}"]`,
+    );
+    if (target) {
+      el.scrollTop = target.offsetTop;
+    } else {
+      el.scrollTop = 0;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapter, book.id]);
+
+  // Throttled scroll listener — find the topmost-visible paragraph and
+  // bubble its index up to the App state for persistence.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let queued = false;
+    const handler = () => {
+      if (queued) return;
+      queued = true;
+      window.setTimeout(() => {
+        queued = false;
+        const ps = el.querySelectorAll<HTMLElement>("[data-p-index]");
+        if (ps.length === 0) return;
+        const containerTop = el.getBoundingClientRect().top;
+        let best = 0;
+        for (const p of ps) {
+          const offset = p.getBoundingClientRect().top - containerTop;
+          if (offset > 8) break;
+          best = Number(p.dataset.pIndex);
+        }
+        onParagraphChangeRef.current(best);
+      }, 250);
+    };
+    el.addEventListener("scroll", handler, { passive: true });
+    return () => el.removeEventListener("scroll", handler);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -265,6 +323,7 @@ export function DesktopReader({
           }}
         >
           <div
+            ref={scrollRef}
             style={{
               flex: 1,
               overflow: "auto",
