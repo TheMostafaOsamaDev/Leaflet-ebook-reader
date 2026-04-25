@@ -74,6 +74,16 @@ export interface BookState {
 export interface Highlight {
   id: string;
   chapter: number;
+  /** Paragraph index within the chapter — matches the `data-p-index` we
+      render on each paragraph element so highlights can be re-anchored
+      when the same chapter is re-rendered, and so the sidebar can jump
+      back to the exact spot. */
+  paragraphIndex: number;
+  /** Inclusive char offset of the first highlighted character within the
+      paragraph's plain text. */
+  charStart: number;
+  /** Exclusive char offset — the first character after the highlight. */
+  charEnd: number;
   text: string;
   note?: string;
   color: "yellow" | "blue" | "pink" | "green";
@@ -514,6 +524,45 @@ export async function updateParagraphPosition(
 ): Promise<void> {
   const state = await readState(id);
   state.paragraphIndex = paragraphIndex;
+  await writeState(state);
+}
+
+export async function saveHighlight(
+  id: string,
+  highlight: Omit<Highlight, "id" | "ts">,
+): Promise<Highlight> {
+  const state = await readState(id);
+  const full: Highlight = {
+    ...highlight,
+    id: crypto.randomUUID(),
+    ts: Date.now(),
+  };
+  state.highlights.push(full);
+  await writeState(state);
+  return full;
+}
+
+export async function deleteHighlight(
+  id: string,
+  highlightId: string,
+): Promise<void> {
+  const state = await readState(id);
+  state.highlights = state.highlights.filter((h) => h.id !== highlightId);
+  await writeState(state);
+}
+
+export async function updateHighlightNote(
+  id: string,
+  highlightId: string,
+  note: string,
+): Promise<void> {
+  const state = await readState(id);
+  const trimmed = note.trim();
+  state.highlights = state.highlights.map((h) =>
+    h.id === highlightId
+      ? { ...h, note: trimmed.length > 0 ? trimmed : undefined }
+      : h,
+  );
   await writeState(state);
 }
 

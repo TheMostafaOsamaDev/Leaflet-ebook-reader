@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
+import { SelectionPopover } from "./SelectionPopover";
 import type { EpubBook } from "../epub/types";
-import type { BookState } from "../store/library";
+import type { BookState, Highlight } from "../store/library";
+import type { HighlightColor } from "../styles/tokens";
+import {
+  resolveSelectionAnchor,
+  type SelectionAnchor,
+} from "../lib/selectionAnchor";
 import {
   FONT_STACKS,
   isArabicTitle,
@@ -30,6 +36,18 @@ interface Props {
   resumeParagraph: number;
   onChapterChange: (order: number) => void;
   onParagraphChange: (idx: number) => void;
+  onCreateHighlight: (input: {
+    chapter: number;
+    paragraphIndex: number;
+    charStart: number;
+    charEnd: number;
+    text: string;
+    color: HighlightColor;
+    note?: string;
+  }) => void;
+  onDeleteHighlight: (id: string) => void;
+  onUpdateHighlightNote: (id: string, note: string) => void;
+  onJumpToHighlight: (h: Highlight) => void;
   activePanel: ActivePanel;
   setActivePanel: (next: ActivePanel) => void;
   onBack: () => void;
@@ -61,6 +79,10 @@ export function DesktopReader({
   resumeParagraph,
   onChapterChange,
   onParagraphChange,
+  onCreateHighlight,
+  onDeleteHighlight,
+  onUpdateHighlightNote,
+  onJumpToHighlight,
   activePanel,
   setActivePanel,
   onBack,
@@ -155,6 +177,53 @@ export function DesktopReader({
     chapterCount > 1
       ? Array.from({ length: chapterCount - 1 }, (_, i) => (i + 1) / chapterCount)
       : [];
+
+  // Selection-driven highlight popover. We resolve the selection on
+  // mouseup (after the browser has finalized it) and again on
+  // selectionchange (so keyboard-driven extends update the anchor in
+  // place). Dismiss when the selection collapses.
+  const [selAnchor, setSelAnchor] = useState<SelectionAnchor | null>(null);
+  useEffect(() => {
+    const refresh = () => {
+      const next = resolveSelectionAnchor();
+      setSelAnchor((prev) => {
+        if (!next) return null;
+        if (
+          prev &&
+          prev.paragraphIndex === next.paragraphIndex &&
+          prev.charStart === next.charStart &&
+          prev.charEnd === next.charEnd
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const onMouseUp = () => window.setTimeout(refresh, 0);
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("selectionchange", refresh);
+    return () => {
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("selectionchange", refresh);
+    };
+  }, []);
+  const dismissSelection = () => {
+    setSelAnchor(null);
+    window.getSelection()?.removeAllRanges();
+  };
+  const createFromSelection = (color: HighlightColor, note?: string) => {
+    if (!selAnchor) return;
+    onCreateHighlight({
+      chapter: currentChapter,
+      paragraphIndex: selAnchor.paragraphIndex,
+      charStart: selAnchor.charStart,
+      charEnd: selAnchor.charEnd,
+      text: selAnchor.text,
+      color,
+      note: note?.trim() || undefined,
+    });
+    dismissSelection();
+  };
 
   // Click + drag the bottom progress bar to scrub through chapters.
   // Pointer capture keeps drag alive after the cursor leaves the track.
@@ -330,6 +399,12 @@ export function DesktopReader({
             themeKey={themeKey}
             onClose={() => setActivePanel(null)}
             highlights={state.highlights}
+            onJump={(h) => {
+              onJumpToHighlight(h);
+              setActivePanel(null);
+            }}
+            onDelete={onDeleteHighlight}
+            onUpdateNote={onUpdateHighlightNote}
           />
         )}
 
@@ -356,6 +431,7 @@ export function DesktopReader({
               chapter={chapter}
               chapterCount={chapterCount}
               theme={theme}
+              themeKey={themeKey}
               fontFamily={t.fontFamily}
               fontSize={t.fontSize}
               lineHeight={t.lineHeight}
@@ -364,6 +440,7 @@ export function DesktopReader({
               columns={t.columns}
               rtl={t.rtl}
               maxWidth={t.pageWidth}
+              highlights={state.highlights}
             />
           </div>
 
@@ -530,6 +607,15 @@ export function DesktopReader({
           </div>
         )}
       </div>
+      {selAnchor && (
+        <SelectionPopover
+          theme={theme}
+          anchor={selAnchor.rect}
+          onPick={(color) => createFromSelection(color)}
+          onAddNote={(color, note) => createFromSelection(color, note)}
+          onDismiss={dismissSelection}
+        />
+      )}
     </div>
   );
 }
