@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
 import type { EpubChapter } from "../epub/types";
 import {
-  FONT_ARABIC,
   FONT_SERIF_DISPLAY,
   FONT_STACKS,
   type FontFamilyKey,
@@ -47,7 +46,12 @@ export function BookBody({
     columnRule: columns > 1 ? `0.5px solid ${theme.rule}` : "none",
   };
 
-  const bodyFont = rtl ? FONT_ARABIC : FONT_STACKS[fontFamily];
+  // Honour the user's font choice in both LTR and RTL. Each FONT_STACKS
+  // entry already lists an Arabic-capable fallback (Readex Pro for the
+  // Latin-first stacks; Cairo/Lateef/Tajawal are Arabic-primary), so the
+  // old `FONT_ARABIC` force-override is no longer needed and was silently
+  // ignoring the user's selection in RTL mode.
+  const bodyFont = FONT_STACKS[fontFamily];
   // Drop the first paragraph if it's just the chapter title repeated — many
   // EPUBs include an <h1>/<h2> with the title as the first block element.
   const normalizedTitle = chapter.title.trim().toLowerCase();
@@ -81,7 +85,10 @@ export function BookBody({
         </div>
         <h2
           style={{
-            fontFamily: rtl ? FONT_ARABIC : FONT_SERIF_DISPLAY,
+            // In RTL, match the body font so the chapter title doesn't
+            // jump to a different typeface than the paragraphs. In LTR,
+            // keep the italic display serif for the editorial look.
+            fontFamily: rtl ? bodyFont : FONT_SERIF_DISPLAY,
             fontSize: fontSize * 1.7,
             fontWeight: 500,
             fontStyle: rtl ? "normal" : "italic",
