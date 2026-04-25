@@ -13,7 +13,6 @@ export interface IconProps {
 export const ICONS = {
   menu: "M3 6h18M3 12h18M3 18h18",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
-  bookmark: "M6 3h12v18l-6-4.5L6 21V3z",
   highlight: "M4 19h16M5 15l5-5 7 7-5 5H5v-7zM13 5l5 5",
   search: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35",
   arrowL: "M15 18l-6-6 6-6",
