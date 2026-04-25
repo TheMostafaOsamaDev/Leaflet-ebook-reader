@@ -10,6 +10,7 @@ import { BookCover } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
 import { EditBookModal } from "./EditBookModal";
 import { ContextMenu } from "./ContextMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import {
   clearLibrary,
@@ -225,10 +226,30 @@ export function Library({ theme, layout, onOpen }: Props) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
-  const onMenuDelete = async (bookId: string, title: string) => {
-    closeContextMenu();
-    if (!confirm(`Remove “${title}” from your library?`)) return;
+  // Single source of truth for the remove-confirmation popup. Every entry
+  // point (hero card, context menu, edit modal) routes through here so we
+  // don't end up with three inline confirms drifting apart.
+  const [pendingDelete, setPendingDelete] = useState<{
+    bookId: string;
+    title: string;
+    closeEditAfter?: boolean;
+  } | null>(null);
+  const requestDelete = (
+    bookId: string,
+    title: string,
+    opts?: { closeEditAfter?: boolean },
+  ) => setPendingDelete({ bookId, title, ...opts });
+  const cancelDelete = () => setPendingDelete(null);
+  const performDelete = async () => {
+    if (!pendingDelete) return;
+    const { bookId, closeEditAfter } = pendingDelete;
+    setPendingDelete(null);
+    if (closeEditAfter) setEditingId(null);
     await onDelete(bookId);
+  };
+  const onMenuDelete = (bookId: string, title: string) => {
+    closeContextMenu();
+    requestDelete(bookId, title);
   };
 
   const layoutEl =
@@ -244,7 +265,10 @@ export function Library({ theme, layout, onOpen }: Props) {
         onImport={onImport}
         onImportFolder={onImportFolder}
         onClearAll={onClearAll}
-        onDelete={onDelete}
+        onDelete={(id) => {
+          const b = books.find((x) => x.id === id);
+          if (b) requestDelete(b.id, b.title);
+        }}
         onEdit={(id) => setEditingId(id)}
         onCardContextMenu={openContextMenu}
         onRescanCover={onRescanCover}
@@ -262,7 +286,10 @@ export function Library({ theme, layout, onOpen }: Props) {
         onImport={onImport}
         onImportFolder={onImportFolder}
         onClearAll={onClearAll}
-        onDelete={onDelete}
+        onDelete={(id) => {
+          const b = books.find((x) => x.id === id);
+          if (b) requestDelete(b.id, b.title);
+        }}
         onEdit={(id) => setEditingId(id)}
         onCardContextMenu={openContextMenu}
         onRescanCover={onRescanCover}
@@ -281,10 +308,11 @@ export function Library({ theme, layout, onOpen }: Props) {
           coverSrc={covers[editingBook.id]}
           onClose={() => setEditingId(null)}
           onSave={(patch) => onEditSave(editingBook.id, patch)}
-          onDelete={async () => {
-            await onDelete(editingBook.id);
-            setEditingId(null);
-          }}
+          onDelete={() =>
+            requestDelete(editingBook.id, editingBook.title, {
+              closeEditAfter: true,
+            })
+          }
           onSetCover={() => onSetCover(editingBook.id)}
           onRescanCover={() => onRescanCover(editingBook.id)}
         />
@@ -302,6 +330,26 @@ export function Library({ theme, layout, onOpen }: Props) {
           }}
           onDelete={() => onMenuDelete(menuBook.id, menuBook.title)}
           onClose={closeContextMenu}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          theme={theme}
+          title="Remove from library?"
+          message={
+            <>
+              <strong style={{ color: theme.ink }}>
+                “{pendingDelete.title}”
+              </strong>{" "}
+              will be removed from your library, including its reading
+              progress. This can't be undone.
+            </>
+          }
+          confirmLabel="Remove"
+          cancelLabel="Cancel"
+          confirmVariant="destructive"
+          onConfirm={performDelete}
+          onCancel={cancelDelete}
         />
       )}
     </>
@@ -969,10 +1017,7 @@ function HeroContinueCard({
               theme={theme}
               variant="destructiveGhost"
               size="md"
-              onClick={() => {
-                if (confirm(`Remove “${book.title}” from your library?`))
-                  onDelete();
-              }}
+              onClick={onDelete}
             >
               Remove from library
             </Button>

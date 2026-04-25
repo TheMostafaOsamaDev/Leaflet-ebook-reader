@@ -226,10 +226,7 @@ export function EditBookModal({
             theme={theme}
             variant="destructive"
             size="sm"
-            onClick={() => {
-              if (confirm(`Remove “${book.title}” from your library?`))
-                void onDelete();
-            }}
+            onClick={() => void onDelete()}
           >
             Remove from library
           </Button>
