@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { BookCover } from "./BookCover";
+import { Button } from "./Button";
 import { paletteForId } from "../store/palette";
 import type { BookIndexEntry } from "../store/library";
 import { FONT_SERIF_DISPLAY, FONT_STACKS, type Theme } from "../styles/tokens";
@@ -163,20 +164,22 @@ export function EditBookModal({
               src={coverSrc}
             />
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <button
+              <Button
+                theme={theme}
+                variant="outline"
+                size="sm"
                 onClick={() => onSetCover()}
-                style={ghostBtn(theme)}
-                type="button"
               >
                 Replace cover…
-              </button>
-              <button
+              </Button>
+              <Button
+                theme={theme}
+                variant="outline"
+                size="sm"
                 onClick={() => onRescanCover()}
-                style={ghostBtn(theme)}
-                type="button"
               >
                 Rescan from EPUB
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -219,49 +222,30 @@ export function EditBookModal({
             gap: 8,
           }}
         >
-          <button
+          <Button
+            theme={theme}
+            variant="destructive"
+            size="sm"
             onClick={() => {
               if (confirm(`Remove “${book.title}” from your library?`))
                 void onDelete();
             }}
-            type="button"
-            style={{
-              padding: "8px 14px",
-              background: "transparent",
-              color: "#c04a3a",
-              border: "0.5px solid #c04a3a",
-              borderRadius: 8,
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: FONT_STACKS.sans,
-            }}
           >
             Remove from library
-          </button>
+          </Button>
           <div style={{ flex: 1 }} />
-          <button onClick={onClose} style={ghostBtn(theme)} type="button">
+          <Button theme={theme} variant="outline" size="sm" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            theme={theme}
+            variant="primary"
+            size="sm"
             onClick={submit}
             disabled={saving}
-            type="button"
-            style={{
-              padding: "8px 18px",
-              background: theme.ink,
-              color: theme.bg,
-              border: "none",
-              borderRadius: 8,
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: saving ? "progress" : "pointer",
-              fontFamily: FONT_STACKS.sans,
-              opacity: saving ? 0.6 : 1,
-            }}
           >
             {saving ? "Saving…" : "Save"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -304,16 +288,3 @@ function textInput(theme: Theme): React.CSSProperties {
   };
 }
 
-function ghostBtn(theme: Theme): React.CSSProperties {
-  return {
-    padding: "8px 14px",
-    background: "transparent",
-    color: theme.ink,
-    border: `0.5px solid ${theme.rule}`,
-    borderRadius: 8,
-    fontSize: 12.5,
-    fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: FONT_STACKS.sans,
-  };
-}

@@ -10,6 +10,7 @@ import { BookCover } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
 import { EditBookModal } from "./EditBookModal";
 import { ContextMenu } from "./ContextMenu";
+import { Button } from "./Button";
 import {
   clearLibrary,
   coverSrcFor,
@@ -401,76 +402,40 @@ function DesktopLibrary({
         </div>
         <div style={{ flex: 1 }} />
         {import.meta.env.DEV && (
-          <button
+          <Button
+            theme={theme}
+            variant="destructive"
+            size="sm"
             onClick={onClearAll}
             disabled={importing}
             title="Dev only — wipes every book from the library"
-            style={{
-              padding: "7px 14px",
-              background: "transparent",
-              color: "#c04a3a",
-              border: "0.5px solid #c04a3a",
-              borderRadius: 8,
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: importing ? "progress" : "pointer",
-              fontFamily: FONT_STACKS.sans,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              marginRight: 8,
-              opacity: importing ? 0.6 : 1,
-            }}
+            leadingIcon={<Icon name="close" size={13} />}
+            style={{ marginRight: 8 }}
           >
-            <Icon name="close" size={13} />
             Clear all
-          </button>
+          </Button>
         )}
-        <button
+        <Button
+          theme={theme}
+          variant="outline"
+          size="sm"
           onClick={onImportFolder}
           disabled={importing}
-          style={{
-            padding: "7px 14px",
-            background: "transparent",
-            color: theme.ink,
-            border: `0.5px solid ${theme.rule}`,
-            borderRadius: 8,
-            fontSize: 12.5,
-            fontWeight: 500,
-            cursor: importing ? "progress" : "pointer",
-            fontFamily: FONT_STACKS.sans,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            marginRight: 8,
-            opacity: importing ? 0.6 : 1,
-          }}
+          leadingIcon={<Icon name="folder" size={13} />}
+          style={{ marginRight: 8 }}
         >
-          <Icon name="plus" size={13} />
           Import folder
-        </button>
-        <button
+        </Button>
+        <Button
+          theme={theme}
+          variant="primary"
+          size="sm"
           onClick={onImport}
           disabled={importing}
-          style={{
-            padding: "7px 14px",
-            background: theme.ink,
-            color: theme.bg,
-            border: "none",
-            borderRadius: 8,
-            fontSize: 12.5,
-            fontWeight: 600,
-            cursor: importing ? "progress" : "pointer",
-            fontFamily: FONT_STACKS.sans,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            opacity: importing ? 0.6 : 1,
-          }}
+          leadingIcon={<Icon name="plus" size={13} />}
         >
-          <Icon name="plus" size={13} />
           {importing ? "Importing…" : "Import EPUB"}
-        </button>
+        </Button>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "32px 40px 40px" }}>
@@ -986,61 +951,26 @@ function HeroContinueCard({
               marginTop: 16,
               display: "flex",
               alignItems: "center",
-              gap: 12,
+              gap: 8,
             }}
           >
-            <button
-              onClick={onOpen}
-              style={{
-                padding: "10px 20px",
-                background: theme.ink,
-                color: theme.bg,
-                border: "none",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: FONT_STACKS.sans,
-                letterSpacing: "-0.01em",
-              }}
-            >
+            <Button theme={theme} variant="primary" size="md" onClick={onOpen}>
               {book.lastReadAt ? "Resume reading →" : "Start reading →"}
-            </button>
-            <button
-              onClick={onEdit}
-              style={{
-                padding: "10px 14px",
-                background: "transparent",
-                color: theme.muted,
-                border: "none",
-                borderRadius: 8,
-                fontSize: 12.5,
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: FONT_STACKS.sans,
-              }}
-            >
+            </Button>
+            <Button theme={theme} variant="ghost" size="md" onClick={onEdit}>
               Edit details
-            </button>
-            <button
+            </Button>
+            <Button
+              theme={theme}
+              variant="ghost"
+              size="md"
               onClick={() => {
                 if (confirm(`Remove “${book.title}” from your library?`))
                   onDelete();
               }}
-              style={{
-                padding: "10px 14px",
-                background: "transparent",
-                color: theme.muted,
-                border: "none",
-                borderRadius: 8,
-                fontSize: 12.5,
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: FONT_STACKS.sans,
-              }}
             >
               Remove from library
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -1231,25 +1161,16 @@ function EmptyState({
         Import an EPUB to start reading. Leaflet parses it locally — no
         uploads, no accounts.
       </div>
-      <button
+      <Button
+        theme={theme}
+        variant="primary"
+        size="md"
         onClick={onImport}
         disabled={importing}
-        style={{
-          padding: "11px 22px",
-          background: theme.ink,
-          color: theme.bg,
-          border: "none",
-          borderRadius: 8,
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: importing ? "progress" : "pointer",
-          fontFamily: FONT_STACKS.sans,
-          letterSpacing: "-0.01em",
-          opacity: importing ? 0.6 : 1,
-        }}
+        leadingIcon={<Icon name="plus" size={14} />}
       >
         {importing ? "Importing…" : "Import your first EPUB"}
-      </button>
+      </Button>
     </div>
   );
 }
