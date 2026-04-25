@@ -1016,14 +1016,43 @@ function LibraryCard({
       }}
     >
       <div style={{ cursor: "pointer" }} onClick={onOpen}>
-        <BookCover
-          title={book.title}
-          author={book.author}
-          palette={paletteForId(book.id)}
-          size="md"
-          src={coverSrc}
-        />
+        <div style={{ position: "relative" }}>
+          <BookCover
+            title={book.title}
+            author={book.author}
+            palette={paletteForId(book.id)}
+            size="md"
+            src={coverSrc}
+          />
+          {book.progress === 0 && (
+            <span
+              aria-label="New — not started yet"
+              style={{
+                position: "absolute",
+                top: 8,
+                left: 8,
+                padding: "3px 7px",
+                borderRadius: 4,
+                // Dark blurred pill reads on any cover art without
+                // dominating it. Same idiom we use elsewhere for cover-
+                // surface overlays.
+                background: "rgba(0,0,0,0.55)",
+                color: "#fff",
+                fontSize: 9.5,
+                fontWeight: 700,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontFamily: FONT_STACKS.sans,
+                backdropFilter: "blur(6px)",
+                pointerEvents: "none",
+              }}
+            >
+              New
+            </span>
+          )}
+        </div>
         <div
+          title={book.title}
           style={{
             marginTop: 12,
             fontFamily: titleFontFor(book.title),
@@ -1032,7 +1061,9 @@ function LibraryCard({
             color: theme.ink,
             letterSpacing: "-0.005em",
             fontWeight: 500,
-            textWrap: "balance",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
           {book.title}
@@ -1064,22 +1095,7 @@ function LibraryCard({
             >
               <Icon name="check" size={11} /> Finished
             </span>
-          ) : book.progress === 0 ? (
-            <span
-              style={{
-                fontSize: 10,
-                color: theme.ink,
-                fontWeight: 600,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                padding: "2px 7px",
-                border: `0.5px solid ${theme.ink}`,
-                borderRadius: 3,
-              }}
-            >
-              New
-            </span>
-          ) : (
+          ) : book.progress > 0 ? (
             <>
               <div
                 style={{
@@ -1108,7 +1124,7 @@ function LibraryCard({
                 {Math.round(book.progress * 100)}%
               </span>
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
