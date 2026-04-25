@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from "react";
 import { Icon } from "./Icon";
 import { BookCover } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
+import { EditBookModal } from "./EditBookModal";
 import {
   clearLibrary,
   coverSrcFor,
@@ -11,6 +19,7 @@ import {
   deleteBook,
   rescanCover,
   setCoverFromFile,
+  updateBookMeta,
   type BookIndexEntry,
 } from "../store/library";
 import { paletteForId } from "../store/palette";
@@ -173,6 +182,22 @@ export function Library({ theme, layout, onOpen }: Props) {
     }
   };
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editingBook =
+    editingId !== null ? books.find((b) => b.id === editingId) : undefined;
+  const onEditSave = async (
+    id: string,
+    patch: { title: string; author: string; description: string },
+  ) => {
+    try {
+      await updateBookMeta(id, patch);
+      await refresh();
+      setEditingId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const layoutEl =
     layout === "mobile" ? (
       <MobileLibrary
@@ -187,6 +212,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         onImportFolder={onImportFolder}
         onClearAll={onClearAll}
         onDelete={onDelete}
+        onEdit={(id) => setEditingId(id)}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
       />
@@ -203,6 +229,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         onImportFolder={onImportFolder}
         onClearAll={onClearAll}
         onDelete={onDelete}
+        onEdit={(id) => setEditingId(id)}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
       />
@@ -212,6 +239,17 @@ export function Library({ theme, layout, onOpen }: Props) {
     <>
       {layoutEl}
       <Toast theme={theme} toast={toast} onDismiss={() => setToast(null)} />
+      {editingBook && (
+        <EditBookModal
+          theme={theme}
+          book={editingBook}
+          coverSrc={covers[editingBook.id]}
+          onClose={() => setEditingId(null)}
+          onSave={(patch) => onEditSave(editingBook.id, patch)}
+          onSetCover={() => onSetCover(editingBook.id)}
+          onRescanCover={() => onRescanCover(editingBook.id)}
+        />
+      )}
     </>
   );
 }
@@ -228,6 +266,7 @@ interface LayoutProps {
   onImportFolder: () => void;
   onClearAll: () => void;
   onDelete: (id: string) => void;
+  onEdit: (id: string) => void;
   onRescanCover: (id: string) => void;
   onSetCover: (id: string) => void;
 }
@@ -244,6 +283,7 @@ function DesktopLibrary({
   onImportFolder,
   onClearAll,
   onDelete,
+  onEdit,
   onRescanCover,
   onSetCover,
 }: LayoutProps) {
@@ -398,6 +438,7 @@ function DesktopLibrary({
                 coverSrc={covers[hero.id]}
                 onOpen={() => onOpen(hero.id)}
                 onDelete={() => onDelete(hero.id)}
+                onEdit={() => onEdit(hero.id)}
                 onRescanCover={() => onRescanCover(hero.id)}
                 onSetCover={() => onSetCover(hero.id)}
               />
@@ -448,6 +489,7 @@ function DesktopLibrary({
                   coverSrc={covers[b.id]}
                   onOpen={() => onOpen(b.id)}
                   onDelete={() => onDelete(b.id)}
+                  onEdit={() => onEdit(b.id)}
                   onRescanCover={() => onRescanCover(b.id)}
                   onSetCover={() => onSetCover(b.id)}
                 />
@@ -472,6 +514,9 @@ function MobileLibrary({
   onImportFolder,
   onClearAll,
 }: LayoutProps) {
+  // `onEdit`, `onDelete`, `onRescanCover`, `onSetCover` are accepted in
+  // LayoutProps but mobile cards don't expose per-book actions yet (long-
+  // press menu is a TODO). The desktop layout is the only consumer today.
   // `onRescanCover`/`onSetCover` arrive in LayoutProps but mobile's compact
   // cards don't expose them yet — long-press menu is a TODO.
   // Hero is the actually-last-read book, not the one most-recently-added.
@@ -754,6 +799,7 @@ function HeroContinueCard({
   coverSrc,
   onOpen,
   onDelete,
+  onEdit,
   onRescanCover,
   onSetCover,
 }: {
@@ -762,6 +808,7 @@ function HeroContinueCard({
   coverSrc?: string;
   onOpen: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onRescanCover: () => void;
   onSetCover: () => void;
 }) {
@@ -906,6 +953,22 @@ function HeroContinueCard({
               {book.lastReadAt ? "Resume reading →" : "Start reading →"}
             </button>
             <button
+              onClick={onEdit}
+              style={{
+                padding: "10px 14px",
+                background: "transparent",
+                color: theme.muted,
+                border: "none",
+                borderRadius: 8,
+                fontSize: 12.5,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: FONT_STACKS.sans,
+              }}
+            >
+              Edit details
+            </button>
+            <button
               onClick={() => {
                 if (confirm(`Remove “${book.title}” from your library?`))
                   onDelete();
@@ -937,6 +1000,7 @@ function LibraryCard({
   coverSrc,
   onOpen,
   onDelete,
+  onEdit,
   onRescanCover,
   onSetCover,
 }: {
@@ -945,12 +1009,18 @@ function LibraryCard({
   coverSrc?: string;
   onOpen: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onRescanCover: () => void;
   onSetCover: () => void;
 }) {
   const hasRealCover = !!coverSrc;
+  const [hover, setHover] = useState(false);
   return (
-    <div style={{ position: "relative" }}>
+    <div
+      style={{ position: "relative" }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <div style={{ cursor: "pointer" }} onClick={onOpen}>
         <BookCover
           title={book.title}
@@ -1060,41 +1130,62 @@ function LibraryCard({
           )}
         </div>
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          if (confirm(`Remove “${book.title}” from your library?`))
-            onDelete();
-        }}
-        title="Remove from library"
-        aria-label="Remove from library"
+      <div
         style={{
           position: "absolute",
           top: 4,
           right: 4,
-          width: 24,
-          height: 24,
-          borderRadius: 12,
-          border: "none",
-          background: "rgba(0,0,0,0.5)",
-          color: "#fff",
-          cursor: "pointer",
-          opacity: 0,
-          transition: "opacity .12s",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          gap: 4,
+          opacity: hover ? 1 : 0,
+          transition: "opacity .12s",
+          pointerEvents: hover ? "auto" : "none",
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
-        onFocus={(e) => (e.currentTarget.style.opacity = "1")}
-        onBlur={(e) => (e.currentTarget.style.opacity = "0")}
       >
-        <Icon name="close" size={12} />
-      </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          title="Edit details"
+          aria-label="Edit details"
+          style={hoverIconBtn}
+          onFocus={() => setHover(true)}
+          onBlur={() => setHover(false)}
+        >
+          <Icon name="pencil" size={12} />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm(`Remove “${book.title}” from your library?`))
+              onDelete();
+          }}
+          title="Remove from library"
+          aria-label="Remove from library"
+          style={hoverIconBtn}
+          onFocus={() => setHover(true)}
+          onBlur={() => setHover(false)}
+        >
+          <Icon name="close" size={12} />
+        </button>
+      </div>
     </div>
   );
 }
+
+const hoverIconBtn: CSSProperties = {
+  width: 24,
+  height: 24,
+  borderRadius: 12,
+  border: "none",
+  background: "rgba(0,0,0,0.5)",
+  color: "#fff",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
 
 function EmptyState({
   theme,
