@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type MouseEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { BookCover } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
@@ -271,8 +265,6 @@ export function Library({ theme, layout, onOpen }: Props) {
         }}
         onEdit={(id) => setEditingId(id)}
         onCardContextMenu={openContextMenu}
-        onRescanCover={onRescanCover}
-        onSetCover={onSetCover}
       />
     ) : (
       <DesktopLibrary
@@ -292,8 +284,6 @@ export function Library({ theme, layout, onOpen }: Props) {
         }}
         onEdit={(id) => setEditingId(id)}
         onCardContextMenu={openContextMenu}
-        onRescanCover={onRescanCover}
-        onSetCover={onSetCover}
       />
     );
 
@@ -370,8 +360,6 @@ interface LayoutProps {
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
   onCardContextMenu: (id: string, x: number, y: number) => void;
-  onRescanCover: (id: string) => void;
-  onSetCover: (id: string) => void;
 }
 
 function DesktopLibrary({
@@ -388,8 +376,6 @@ function DesktopLibrary({
   onDelete,
   onEdit,
   onCardContextMenu,
-  onRescanCover,
-  onSetCover,
 }: LayoutProps) {
   // Hero is the actually-last-read book, not the one most-recently-added.
   // `listBooks()` already sorts read books above unread by lastReadAt, so
@@ -507,8 +493,6 @@ function DesktopLibrary({
                 onOpen={() => onOpen(hero.id)}
                 onDelete={() => onDelete(hero.id)}
                 onEdit={() => onEdit(hero.id)}
-                onRescanCover={() => onRescanCover(hero.id)}
-                onSetCover={() => onSetCover(hero.id)}
               />
             )}
 
@@ -559,8 +543,6 @@ function DesktopLibrary({
                   onContextMenu={(x: number, y: number) =>
                     onCardContextMenu(b.id, x, y)
                   }
-                  onRescanCover={() => onRescanCover(b.id)}
-                  onSetCover={() => onSetCover(b.id)}
                 />
               ))}
             </div>
@@ -583,11 +565,9 @@ function MobileLibrary({
   onImportFolder,
   onClearAll,
 }: LayoutProps) {
-  // `onEdit`, `onDelete`, `onRescanCover`, `onSetCover` are accepted in
-  // LayoutProps but mobile cards don't expose per-book actions yet (long-
-  // press menu is a TODO). The desktop layout is the only consumer today.
-  // `onRescanCover`/`onSetCover` arrive in LayoutProps but mobile's compact
-  // cards don't expose them yet — long-press menu is a TODO.
+  // `onEdit` and `onDelete` are accepted in LayoutProps but mobile cards
+  // don't expose per-book actions yet — long-press menu is a TODO. The
+  // desktop layout is the only consumer today.
   // Hero is the actually-last-read book, not the one most-recently-added.
   // `listBooks()` already sorts read books above unread by lastReadAt, so
   // the first entry with lastReadAt defined is the right pick. If no book
@@ -869,8 +849,6 @@ function HeroContinueCard({
   onOpen,
   onDelete,
   onEdit,
-  onRescanCover,
-  onSetCover,
 }: {
   theme: Theme;
   book: BookIndexEntry;
@@ -878,11 +856,8 @@ function HeroContinueCard({
   onOpen: () => void;
   onDelete: () => void;
   onEdit: () => void;
-  onRescanCover: () => void;
-  onSetCover: () => void;
 }) {
   const palette = paletteForId(book.id);
-  const hasRealCover = !!coverSrc;
   return (
     <div
       style={{
@@ -893,22 +868,13 @@ function HeroContinueCard({
         flexWrap: "wrap",
       }}
     >
-      <div style={{ position: "relative" }}>
-        <BookCover
-          title={book.title}
-          author={book.author}
-          palette={palette}
-          size="lg"
-          src={coverSrc}
-        />
-        {!hasRealCover && (
-          <CoverFixHint
-            theme={theme}
-            onRescan={() => onRescanCover()}
-            onPick={() => onSetCover()}
-          />
-        )}
-      </div>
+      <BookCover
+        title={book.title}
+        author={book.author}
+        palette={palette}
+        size="lg"
+        src={coverSrc}
+      />
       {/* minWidth: 0 so the title's nowrap+ellipsis clips at the flex
           child's assigned width instead of letting the child grow to
           accommodate the full title. */}
@@ -1034,18 +1000,13 @@ function LibraryCard({
   coverSrc,
   onOpen,
   onContextMenu,
-  onRescanCover,
-  onSetCover,
 }: {
   theme: Theme;
   book: BookIndexEntry;
   coverSrc?: string;
   onOpen: () => void;
   onContextMenu: (x: number, y: number) => void;
-  onRescanCover: () => void;
-  onSetCover: () => void;
 }) {
-  const hasRealCover = !!coverSrc;
   return (
     <div
       style={{ position: "relative" }}
@@ -1062,19 +1023,6 @@ function LibraryCard({
           size="md"
           src={coverSrc}
         />
-        {!hasRealCover && (
-          <CoverFixHint
-            theme={theme}
-            onRescan={(e) => {
-              e.stopPropagation();
-              onRescanCover();
-            }}
-            onPick={(e) => {
-              e.stopPropagation();
-              onSetCover();
-            }}
-          />
-        )}
         <div
           style={{
             marginTop: 12,
@@ -1221,80 +1169,6 @@ function EmptyState({
       >
         {importing ? "Importing…" : "Import your first EPUB"}
       </Button>
-    </div>
-  );
-}
-
-/**
- * A small, unobtrusive overlay anchored to the bottom of the cover art.
- * Only shown when no real cover image was extracted — offers a one-click
- * re-scan, and a "Set cover…" escape hatch to pick any image from disk.
- */
-function CoverFixHint({
-  theme,
-  onRescan,
-  onPick,
-}: {
-  theme: Theme;
-  onRescan: (e: MouseEvent) => void;
-  onPick: (e: MouseEvent) => void;
-}) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: 6,
-        right: 6,
-        bottom: 6,
-        display: "flex",
-        gap: 4,
-        justifyContent: "center",
-        pointerEvents: "none",
-      }}
-    >
-      <button
-        onClick={onRescan}
-        title="Try extracting the cover from the EPUB again"
-        aria-label="Rescan cover"
-        style={{
-          pointerEvents: "auto",
-          flex: 1,
-          padding: "5px 6px",
-          border: "none",
-          borderRadius: 5,
-          background: "rgba(0,0,0,0.55)",
-          color: "#fff",
-          fontSize: 10,
-          fontFamily: FONT_STACKS.sans,
-          fontWeight: 600,
-          letterSpacing: "0.04em",
-          cursor: "pointer",
-          backdropFilter: "blur(6px)",
-        }}
-      >
-        Rescan
-      </button>
-      <button
-        onClick={onPick}
-        title="Pick any image from your computer to use as the cover"
-        aria-label="Set cover from file"
-        style={{
-          pointerEvents: "auto",
-          flex: 1,
-          padding: "5px 6px",
-          border: "none",
-          borderRadius: 5,
-          background: theme.ink,
-          color: theme.bg,
-          fontSize: 10,
-          fontFamily: FONT_STACKS.sans,
-          fontWeight: 600,
-          letterSpacing: "0.04em",
-          cursor: "pointer",
-        }}
-      >
-        Set cover…
-      </button>
     </div>
   );
 }
