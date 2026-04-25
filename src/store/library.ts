@@ -50,6 +50,8 @@ export interface BookIndexEntry {
    * asset URL so the webview's cache doesn't hide the new image.
    */
   coverBust?: number;
+  /** Free-form description shown in the library's edit dialog. */
+  description?: string;
 }
 
 export interface BookState {
@@ -430,6 +432,25 @@ export async function clearLibrary(): Promise<void> {
     }
   }
   await writeIndex({ version: 1, books: [] });
+}
+
+/**
+ * Patch one or more user-editable fields on a book's index entry. Used by
+ * the library's "Edit book" dialog. Only fields supplied in `patch` are
+ * touched — everything else is left as-is.
+ */
+export async function updateBookMeta(
+  id: string,
+  patch: { title?: string; author?: string; description?: string },
+): Promise<BookIndexEntry | null> {
+  const idx = await readIndex();
+  const entry = idx.books.find((b) => b.id === id);
+  if (!entry) return null;
+  if (patch.title !== undefined) entry.title = patch.title;
+  if (patch.author !== undefined) entry.author = patch.author;
+  if (patch.description !== undefined) entry.description = patch.description;
+  await writeIndex(idx);
+  return entry;
 }
 
 export async function deleteBook(id: string): Promise<void> {
