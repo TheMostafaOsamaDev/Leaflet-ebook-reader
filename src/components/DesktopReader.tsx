@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import type { EpubBook } from "../epub/types";
@@ -158,6 +158,43 @@ export function DesktopReader({
     chapterCount > 1
       ? Array.from({ length: chapterCount - 1 }, (_, i) => (i + 1) / chapterCount)
       : [];
+
+  // Click + drag the bottom progress bar to scrub through chapters.
+  // Pointer capture keeps drag alive after the cursor leaves the track.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const chapterFromClientX = (clientX: number): number | null => {
+    const el = trackRef.current;
+    if (!el || chapterCount === 0) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0) return null;
+    const ratio = Math.min(
+      1,
+      Math.max(0, (clientX - rect.left) / rect.width),
+    );
+    return Math.min(chapterCount - 1, Math.floor(ratio * chapterCount));
+  };
+  const onTrackPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    draggingRef.current = true;
+    setDragging(true);
+    const next = chapterFromClientX(e.clientX);
+    if (next !== null && next !== currentChapter) onChapterChange(next);
+  };
+  const onTrackPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    const next = chapterFromClientX(e.clientX);
+    if (next !== null && next !== currentChapter) onChapterChange(next);
+  };
+  const onTrackPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
 
   return (
     <div
@@ -375,51 +412,79 @@ export function DesktopReader({
             <span style={{ fontVariantNumeric: "tabular-nums", minWidth: 32 }}>
               {pct}%
             </span>
-            <div style={{ flex: 1, position: "relative", height: 3 }}>
+            <div
+              role="slider"
+              aria-label="Chapter"
+              aria-valuemin={1}
+              aria-valuemax={Math.max(1, chapterCount)}
+              aria-valuenow={currentChapter + 1}
+              aria-valuetext={chapter.title}
+              onPointerDown={onTrackPointerDown}
+              onPointerMove={onTrackPointerMove}
+              onPointerUp={onTrackPointerUp}
+              onPointerCancel={onTrackPointerUp}
+              style={{
+                flex: 1,
+                height: 22,
+                display: "flex",
+                alignItems: "center",
+                cursor: dragging ? "grabbing" : "pointer",
+                // Stop the browser from interpreting horizontal pointer
+                // moves as scroll/zoom while we're scrubbing.
+                touchAction: "none",
+                userSelect: "none",
+              }}
+            >
               <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background: theme.rule,
-                  borderRadius: 1.5,
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: `${pct}%`,
-                  background: theme.ink,
-                  borderRadius: 1.5,
-                }}
-              />
-              {ticks.map((p, i) => (
-                <span
-                  key={i}
+                ref={trackRef}
+                style={{ position: "relative", width: "100%", height: 3 }}
+              >
+                <div
                   style={{
                     position: "absolute",
-                    left: `${p * 100}%`,
-                    top: -2,
-                    width: 1,
-                    height: 7,
-                    background: theme.muted,
-                    opacity: 0.5,
+                    inset: 0,
+                    background: theme.rule,
+                    borderRadius: 1.5,
                   }}
                 />
-              ))}
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${pct}%`,
-                  top: "50%",
-                  transform: "translate(-50%, -50%)",
-                  width: 12,
-                  height: 12,
-                  borderRadius: 6,
-                  background: theme.ink,
-                  boxShadow: `0 0 0 3px ${theme.bg}`,
-                }}
-              />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: `${pct}%`,
+                    background: theme.ink,
+                    borderRadius: 1.5,
+                  }}
+                />
+                {ticks.map((p, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      left: `${p * 100}%`,
+                      top: -2,
+                      width: 1,
+                      height: 7,
+                      background: theme.muted,
+                      opacity: 0.5,
+                    }}
+                  />
+                ))}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${pct}%`,
+                    top: "50%",
+                    transform: `translate(-50%, -50%) scale(${dragging ? 1.25 : 1})`,
+                    width: 12,
+                    height: 12,
+                    borderRadius: 6,
+                    background: theme.ink,
+                    boxShadow: `0 0 0 3px ${theme.bg}`,
+                    transition: "transform 120ms ease",
+                  }}
+                />
+              </div>
             </div>
             <span
               style={{
