@@ -66,17 +66,9 @@ export interface BookState {
   /** Index of the topmost-visible paragraph within currentChapter. Lets the
       reader resume from the same scroll position, not just the chapter. */
   paragraphIndex: number;
-  /** Mutable over time — these drive the Bookmarks/Highlights panels.
-      Empty on a freshly imported book. */
-  bookmarks: Bookmark[];
+  /** Mutable over time — drives the Highlights panel. Empty on a freshly
+      imported book. */
   highlights: Highlight[];
-}
-
-export interface Bookmark {
-  id: string;
-  chapter: number;
-  excerpt: string;
-  ts: number;
 }
 
 export interface Highlight {
@@ -140,7 +132,6 @@ async function readState(id: string): Promise<BookState> {
       bookId: id,
       currentChapter: 0,
       paragraphIndex: 0,
-      bookmarks: [],
       highlights: [],
     };
   }
@@ -155,7 +146,6 @@ async function readState(id: string): Promise<BookState> {
       paragraphIndex: typeof parsed.paragraphIndex === "number"
         ? parsed.paragraphIndex
         : 0,
-      bookmarks: Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [],
       highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
     };
   } catch {
@@ -163,7 +153,6 @@ async function readState(id: string): Promise<BookState> {
       bookId: id,
       currentChapter: 0,
       paragraphIndex: 0,
-      bookmarks: [],
       highlights: [],
     };
   }
@@ -237,7 +226,6 @@ export async function importEpubBytes(
     bookId: book.id,
     currentChapter: 0,
     paragraphIndex: 0,
-    bookmarks: [],
     highlights: [],
   });
 
@@ -529,19 +517,3 @@ export async function updateParagraphPosition(
   await writeState(state);
 }
 
-export async function saveBookmark(
-  id: string,
-  bookmark: Omit<Bookmark, "id" | "ts">,
-): Promise<Bookmark> {
-  const state = await readState(id);
-  const full: Bookmark = { ...bookmark, id: crypto.randomUUID(), ts: Date.now() };
-  state.bookmarks.push(full);
-  await writeState(state);
-  return full;
-}
-
-export async function deleteBookmark(id: string, bookmarkId: string) {
-  const state = await readState(id);
-  state.bookmarks = state.bookmarks.filter((b) => b.id !== bookmarkId);
-  await writeState(state);
-}

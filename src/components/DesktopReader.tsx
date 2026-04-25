@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import type { EpubBook } from "../epub/types";
-import type { BookState, Bookmark } from "../store/library";
+import type { BookState } from "../store/library";
 import {
   FONT_STACKS,
   isArabicTitle,
@@ -11,7 +11,6 @@ import {
   type Theme,
   type ThemeKey,
 } from "../styles/tokens";
-import { BookmarksPanel } from "../panels/BookmarksPanel";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
 import { ProgressOverlay } from "../panels/ProgressOverlay";
 import { SettingsPanel } from "../panels/SettingsPanel";
@@ -31,8 +30,6 @@ interface Props {
   resumeParagraph: number;
   onChapterChange: (order: number) => void;
   onParagraphChange: (idx: number) => void;
-  onToggleBookmark: () => void;
-  onDeleteBookmark: (id: string) => void;
   activePanel: ActivePanel;
   setActivePanel: (next: ActivePanel) => void;
   onBack: () => void;
@@ -64,8 +61,6 @@ export function DesktopReader({
   resumeParagraph,
   onChapterChange,
   onParagraphChange,
-  onToggleBookmark,
-  onDeleteBookmark,
   activePanel,
   setActivePanel,
   onBack,
@@ -154,10 +149,6 @@ export function DesktopReader({
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const isBookmarked = state.bookmarks.some(
-    (b: Bookmark) => b.chapter === currentChapter,
-  );
-
   // Chapter ticks on the bottom progress bar — skip current position so
   // the scrubber sits cleanly on top.
   const ticks =
@@ -243,13 +234,6 @@ export function DesktopReader({
           <Icon name="list" size={16} />
         </button>
         <button
-          onClick={() => toggle("bookmarks")}
-          style={chromeBtn(theme, activePanel === "bookmarks")}
-          aria-label="Bookmarks"
-        >
-          <Icon name="bookmark" size={16} />
-        </button>
-        <button
           onClick={() => toggle("highlights")}
           style={chromeBtn(theme, activePanel === "highlights")}
           aria-label="Highlights"
@@ -311,13 +295,6 @@ export function DesktopReader({
         </div>
 
         <button
-          onClick={onToggleBookmark}
-          style={chromeBtn(theme, isBookmarked)}
-          aria-label={isBookmarked ? "Remove bookmark" : "Bookmark chapter"}
-        >
-          <Icon name="bookmark" size={16} fill={isBookmarked ? theme.ink : "none"} />
-        </button>
-        <button
           onClick={() => toggle("progress")}
           style={chromeBtn(theme, activePanel === "progress")}
           aria-label="Progress"
@@ -345,18 +322,6 @@ export function DesktopReader({
               onChapterChange(order);
               setActivePanel(null);
             }}
-          />
-        )}
-        {activePanel === "bookmarks" && (
-          <BookmarksPanel
-            theme={theme}
-            onClose={() => setActivePanel(null)}
-            bookmarks={state.bookmarks}
-            onJump={(ch) => {
-              onChapterChange(ch);
-              setActivePanel(null);
-            }}
-            onDelete={onDeleteBookmark}
           />
         )}
         {activePanel === "highlights" && (

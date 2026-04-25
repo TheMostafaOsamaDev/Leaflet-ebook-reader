@@ -4,9 +4,8 @@ import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import { MobileSheet } from "./MobileSheet";
 import type { EpubBook } from "../epub/types";
-import type { BookState, Bookmark } from "../store/library";
+import type { BookState } from "../store/library";
 import { FONT_STACKS, type Theme, type ThemeKey } from "../styles/tokens";
-import { BookmarksPanel } from "../panels/BookmarksPanel";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
 import { ProgressOverlay } from "../panels/ProgressOverlay";
 import { SettingsPanel } from "../panels/SettingsPanel";
@@ -24,8 +23,6 @@ interface Props {
   resumeParagraph: number;
   onChapterChange: (order: number) => void;
   onParagraphChange: (idx: number) => void;
-  onToggleBookmark: () => void;
-  onDeleteBookmark: (id: string) => void;
   onBack: () => void;
 }
 
@@ -55,8 +52,6 @@ export function MobileReader({
   resumeParagraph,
   onChapterChange,
   onParagraphChange,
-  onToggleBookmark,
-  onDeleteBookmark,
   onBack,
 }: Props) {
   const [showChrome, setShowChrome] = useState(true);
@@ -107,9 +102,6 @@ export function MobileReader({
   const pct = chapterCount > 0
     ? Math.round(((currentChapter + 1) / chapterCount) * 100)
     : 0;
-  const isBookmarked = state.bookmarks.some(
-    (b: Bookmark) => b.chapter === currentChapter,
-  );
   const ticks =
     chapterCount > 1
       ? Array.from({ length: chapterCount - 1 }, (_, i) => (i + 1) / chapterCount)
@@ -190,17 +182,6 @@ export function MobileReader({
               Chapter {currentChapter + 1} / {chapterCount}
             </div>
           </div>
-          <button
-            onClick={onToggleBookmark}
-            style={{ ...mobileTab(theme), width: 36, height: 36 }}
-            aria-label={isBookmarked ? "Remove bookmark" : "Bookmark chapter"}
-          >
-            <Icon
-              name="bookmark"
-              size={16}
-              fill={isBookmarked ? theme.ink : "none"}
-            />
-          </button>
         </div>
       )}
 
@@ -345,13 +326,6 @@ export function MobileReader({
               <Icon name="list" size={18} />
             </button>
             <button
-              onClick={() => setSheet("bookmarks")}
-              style={mobileTab(theme)}
-              aria-label="Bookmarks"
-            >
-              <Icon name="bookmark" size={18} />
-            </button>
-            <button
               onClick={() => setSheet("highlights")}
               style={mobileTab(theme)}
               aria-label="Highlights"
@@ -390,18 +364,6 @@ export function MobileReader({
                   onChapterChange(order);
                   setSheet(null);
                 }}
-              />
-            )}
-            {sheet === "bookmarks" && (
-              <BookmarksPanel
-                theme={theme}
-                onClose={() => setSheet(null)}
-                bookmarks={state.bookmarks}
-                onJump={(ch) => {
-                  onChapterChange(ch);
-                  setSheet(null);
-                }}
-                onDelete={onDeleteBookmark}
               />
             )}
             {sheet === "highlights" && (

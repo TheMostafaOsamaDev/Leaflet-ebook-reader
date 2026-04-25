@@ -6,9 +6,7 @@ import type { EpubBook } from "./epub/types";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useTweaks } from "./hooks/useTweaks";
 import {
-  deleteBookmark,
   loadBook,
-  saveBookmark,
   updateParagraphPosition,
   updateReadingPosition,
   type BookState,
@@ -123,50 +121,6 @@ function App() {
     };
   }, []);
 
-  const toggleBookmark = useCallback(async () => {
-    if (!loaded) return;
-    const { book, state, currentChapter } = loaded;
-    const existing = state.bookmarks.find((b) => b.chapter === currentChapter);
-    if (existing) {
-      await deleteBookmark(book.id, existing.id);
-      setLoaded({
-        ...loaded,
-        state: {
-          ...state,
-          bookmarks: state.bookmarks.filter((b) => b.id !== existing.id),
-        },
-      });
-      return;
-    }
-    const excerpt =
-      book.chapters[currentChapter]?.paragraphs[0]?.text.slice(0, 120) ??
-      book.chapters[currentChapter]?.title ??
-      "";
-    const bm = await saveBookmark(book.id, {
-      chapter: currentChapter,
-      excerpt,
-    });
-    setLoaded({
-      ...loaded,
-      state: { ...state, bookmarks: [...state.bookmarks, bm] },
-    });
-  }, [loaded]);
-
-  const removeBookmark = useCallback(
-    async (bookmarkId: string) => {
-      if (!loaded) return;
-      await deleteBookmark(loaded.book.id, bookmarkId);
-      setLoaded({
-        ...loaded,
-        state: {
-          ...loaded.state,
-          bookmarks: loaded.state.bookmarks.filter((b) => b.id !== bookmarkId),
-        },
-      });
-    },
-    [loaded],
-  );
-
   const inReader = loaded !== null;
 
   return (
@@ -223,8 +177,6 @@ function App() {
           resumeParagraph={loaded!.resumeParagraph}
           onChapterChange={changeChapter}
           onParagraphChange={onParagraphChange}
-          onToggleBookmark={toggleBookmark}
-          onDeleteBookmark={removeBookmark}
           onBack={closeBook}
         />
       ) : (
@@ -239,8 +191,6 @@ function App() {
           resumeParagraph={loaded!.resumeParagraph}
           onChapterChange={changeChapter}
           onParagraphChange={onParagraphChange}
-          onToggleBookmark={toggleBookmark}
-          onDeleteBookmark={removeBookmark}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
           onBack={closeBook}

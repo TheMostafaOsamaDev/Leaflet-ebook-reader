@@ -1,7 +1,6 @@
 export type ActivePanel =
   | null
   | "toc"
-  | "bookmarks"
   | "highlights"
   | "settings"
   | "progress";
