@@ -14,14 +14,14 @@ interface Props {
   src?: string | null;
 }
 
-const DIMS = {
+export const BOOK_COVER_DIMS = {
   sm: { w: 110, h: 164 },
   md: { w: 140, h: 208 },
   lg: { w: 200, h: 296 },
-};
+} as const;
 
 export function BookCover({ title, author, palette, size = "md", src }: Props) {
-  const { w, h } = DIMS[size];
+  const { w, h } = BOOK_COVER_DIMS[size];
   const [p1, p2, p3] = palette;
   const [failed, setFailed] = useState(false);
   const showImage = !!src && !failed;

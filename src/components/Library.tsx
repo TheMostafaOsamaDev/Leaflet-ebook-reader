@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { BookCover } from "./BookCover";
+import { BookCover, BOOK_COVER_DIMS } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
 import { EditBookModal } from "./EditBookModal";
 import { ContextMenu } from "./ContextMenu";
@@ -1009,7 +1009,12 @@ function LibraryCard({
 }) {
   return (
     <div
-      style={{ position: "relative" }}
+      // Pin the whole card to the cover width so the title row's
+      // ellipsis truncates at the cover edge and the progress meter
+      // never extends past it. The grid track is `minmax(140, 1fr)` so
+      // cells stretch on wide viewports — without this, everything
+      // below the cover stretched with the cell.
+      style={{ position: "relative", width: BOOK_COVER_DIMS.md.w }}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(e.clientX, e.clientY);
