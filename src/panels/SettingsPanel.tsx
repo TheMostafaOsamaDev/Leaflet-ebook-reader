@@ -255,7 +255,7 @@ export function SettingsPanel({
           <input
             type="range"
             min={14}
-            max={24}
+            max={32}
             value={t.fontSize}
             onChange={(e) => setTweak("fontSize", +e.target.value)}
             style={{ flex: 1, color: theme.ink }}
