@@ -277,9 +277,9 @@ export function DesktopReader({
               lineHeight={t.lineHeight}
               letterSpacing={t.letterSpacing}
               textAlign={t.textAlign}
-              columns={2}
+              columns={t.columns}
               rtl={t.rtl}
-              maxWidth={900}
+              maxWidth={t.pageWidth}
             />
           </div>
 

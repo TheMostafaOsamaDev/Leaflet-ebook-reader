@@ -25,12 +25,14 @@ const THEME_SWATCHES: ReadonlyArray<[ThemeKey, string, string]> = [
   ["oled", "#000000", "#b8ad94"],
 ];
 
-const FONT_OPTIONS: ReadonlyArray<{
+interface FontOpt {
   value: FontFamilyKey;
   label: string;
   name: string;
   font: string;
-}> = [
+}
+
+const FONT_ROW_LATIN: ReadonlyArray<FontOpt> = [
   { value: "serif", label: "Aa", name: "Serif", font: FONT_STACKS.serif },
   { value: "sans", label: "Aa", name: "Sans", font: FONT_STACKS.sans },
   {
@@ -39,6 +41,12 @@ const FONT_OPTIONS: ReadonlyArray<{
     name: "Dyslexic",
     font: FONT_STACKS.dyslexic,
   },
+];
+
+const FONT_ROW_ARABIC: ReadonlyArray<FontOpt> = [
+  { value: "cairo", label: "أب", name: "Cairo", font: FONT_STACKS.cairo },
+  { value: "lateef", label: "أب", name: "Lateef", font: FONT_STACKS.lateef },
+  { value: "tajawal", label: "أب", name: "Tajawal", font: FONT_STACKS.tajawal },
 ];
 
 function Field({
@@ -195,37 +203,42 @@ export function SettingsPanel({
       </Field>
 
       <Field label="Font" theme={theme}>
-        <SegRow<FontFamilyKey>
-          theme={theme}
-          value={t.fontFamily}
-          onChange={(v) => setTweak("fontFamily", v)}
-          options={FONT_OPTIONS.map((o) => ({
-            value: o.value,
-            label: (
-              <span
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 3,
-                }}
-              >
-                <span style={{ fontFamily: o.font, fontSize: 16 }}>
-                  {o.label}
-                </span>
-                <span
-                  style={{
-                    fontSize: 9.5,
-                    color: theme.muted,
-                    fontWeight: 500,
-                  }}
-                >
-                  {o.name}
-                </span>
-              </span>
-            ),
-          }))}
-        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[FONT_ROW_LATIN, FONT_ROW_ARABIC].map((row, i) => (
+            <SegRow<FontFamilyKey>
+              key={i}
+              theme={theme}
+              value={t.fontFamily}
+              onChange={(v) => setTweak("fontFamily", v)}
+              options={row.map((o) => ({
+                value: o.value,
+                label: (
+                  <span
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 3,
+                    }}
+                  >
+                    <span style={{ fontFamily: o.font, fontSize: 16 }}>
+                      {o.label}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        color: theme.muted,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {o.name}
+                    </span>
+                  </span>
+                ),
+              }))}
+            />
+          ))}
+        </div>
       </Field>
 
       <Field label={`Font size · ${t.fontSize}px`} theme={theme}>
@@ -302,6 +315,30 @@ export function SettingsPanel({
               label: <span style={{ fontSize: 14 }}>⯈</span>,
             },
           ]}
+        />
+      </Field>
+
+      <Field label="Columns" theme={theme}>
+        <SegRow<"1" | "2">
+          theme={theme}
+          value={String(t.columns) as "1" | "2"}
+          onChange={(v) => setTweak("columns", v === "2" ? 2 : 1)}
+          options={[
+            { value: "1", label: "Single" },
+            { value: "2", label: "Two" },
+          ]}
+        />
+      </Field>
+
+      <Field label={`Page width · ${t.pageWidth}px`} theme={theme}>
+        <input
+          type="range"
+          min={480}
+          max={1200}
+          step={20}
+          value={t.pageWidth}
+          onChange={(e) => setTweak("pageWidth", +e.target.value)}
+          style={{ width: "100%", color: theme.ink }}
         />
       </Field>
 

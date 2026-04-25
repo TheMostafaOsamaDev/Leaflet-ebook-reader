@@ -90,17 +90,41 @@ export function hlBg(color: HighlightColor, themeKey: ThemeKey): string {
   return HIGHLIGHT_COLORS[color][isDark ? "dark" : "light"];
 }
 
-export type FontFamilyKey = "serif" | "sans" | "dyslexic";
+export type FontFamilyKey =
+  | "serif"
+  | "sans"
+  | "dyslexic"
+  | "cairo"
+  | "lateef"
+  | "tajawal";
 
 // UI sans is Readex Pro — a variable Latin+Arabic family, so Arabic glyphs
 // render in the same family instead of falling through to an OS default.
 // Serif reading/display stacks still list Readex Pro after their Latin
 // primary so Arabic titles/body text pick it up via per-glyph fallback.
+//
+// Cairo / Lateef / Tajawal are Arabic reading fonts self-hosted under
+// /public/fonts/reading/. Each lists an Amiri/Readex/system sans fallback
+// so Latin glyphs interleaved in the text render in a compatible family
+// instead of the browser default.
 export const FONT_STACKS: Record<FontFamilyKey, string> = {
   serif:
     '"Literata", "Iowan Old Style", "Source Serif Pro", "Readex Pro", Georgia, serif',
   sans: '"Readex Pro", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
-  dyslexic: '"Atkinson Hyperlegible", "Lexend", "Readex Pro", system-ui, sans-serif',
+  dyslexic:
+    '"Atkinson Hyperlegible", "Lexend", "Readex Pro", system-ui, sans-serif',
+  cairo: '"Cairo", "Readex Pro", system-ui, sans-serif',
+  lateef: '"Lateef", "Amiri", "Readex Pro", serif',
+  tajawal: '"Tajawal", "Readex Pro", system-ui, sans-serif',
+};
+
+export const FONT_FAMILY_LABELS: Record<FontFamilyKey, string> = {
+  serif: "Serif",
+  sans: "Sans",
+  dyslexic: "Dyslexic",
+  cairo: "Cairo",
+  lateef: "Lateef",
+  tajawal: "Tajawal",
 };
 
 export const FONT_SERIF_DISPLAY =

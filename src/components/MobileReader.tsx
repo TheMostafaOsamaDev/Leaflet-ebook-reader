@@ -177,6 +177,9 @@ export function MobileReader({
           lineHeight={t.lineHeight}
           letterSpacing={t.letterSpacing}
           textAlign={t.textAlign}
+          // Mobile ignores the columns/pageWidth tweaks — the screen is
+          // narrow enough that two columns or >360px page width would just
+          // overflow. Those tweaks drive the desktop reader only.
           columns={1}
           rtl={t.rtl}
           maxWidth={360}
