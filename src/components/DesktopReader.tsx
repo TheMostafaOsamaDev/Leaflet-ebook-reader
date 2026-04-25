@@ -190,11 +190,12 @@ export function DesktopReader({
   } | null>(null);
 
   // Resolve the selection only when the user *stops* selecting (pointerup),
-  // not while they're still dragging. selectionchange is used solely to
-  // dismiss the popover when the selection collapses (e.g. user clicks
-  // somewhere else).
+  // not while they're still dragging. Pointerups inside our popover are
+  // ignored — those are interactions with the toolbar itself.
   useEffect(() => {
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-popover="highlight"]')) return;
       // Defer one tick so the browser has finalized the selection.
       window.setTimeout(() => {
         const next = resolveSelectionAnchor();
@@ -204,30 +205,14 @@ export function DesktopReader({
         }
       }, 0);
     };
-    const dismissOnCollapse = () => {
-      // The note-editor textarea inside our popovers fires
-      // selectionchange on every caret movement (i.e. every keystroke),
-      // which would tear the popover down mid-typing. Skip dismissal
-      // while focus is inside any popover surface.
-      if (document.activeElement?.closest('[data-popover="highlight"]')) return;
-      const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-        setSelAnchor(null);
-      }
-    };
     document.addEventListener("pointerup", onPointerUp);
-    document.addEventListener("selectionchange", dismissOnCollapse);
-    return () => {
-      document.removeEventListener("pointerup", onPointerUp);
-      document.removeEventListener("selectionchange", dismissOnCollapse);
-    };
+    return () => document.removeEventListener("pointerup", onPointerUp);
   }, []);
 
-  // Click on an existing highlight → open the action popover. Skips
-  // when a non-collapsed selection exists, because that click was
-  // really the tail of a drag-select that ended on top of a <mark>.
-  // Also dismisses both popovers when the click lands outside any
-  // highlight or popover surface.
+  // All popover dismissal flows through clicks: outside a popover and
+  // outside a mark → dismiss both. We deliberately don't use
+  // selectionchange — typing in the popover's note editor moves the
+  // textarea's caret, which would trigger spurious dismissals.
   const highlightById = (id: string) =>
     state.highlights.find((h) => h.id === id);
   useEffect(() => {
@@ -237,6 +222,8 @@ export function DesktopReader({
       // Clicks inside our own popovers are handled by their buttons.
       if (target.closest('[data-popover="highlight"]')) return;
 
+      // Tail of a drag-select that landed on a mark/text — let the
+      // pointerup handler set the create popover; don't dismiss here.
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) return;
 
@@ -249,8 +236,9 @@ export function DesktopReader({
           return;
         }
       }
-      // Click outside any highlight or popover — dismiss any open action.
+      // Click outside any highlight or popover — dismiss everything.
       setActiveHl(null);
+      setSelAnchor(null);
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
