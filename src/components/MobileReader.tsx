@@ -157,8 +157,13 @@ export function MobileReader({
   // ignored — those are interactions with the toolbar itself.
   useEffect(() => {
     const onPointerUp = (e: PointerEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('[data-popover="highlight"]')) return;
+      const path = (e.composedPath?.() ?? []) as EventTarget[];
+      const inPopover = path.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.dataset.popover === "highlight",
+      );
+      if (inPopover) return;
       window.setTimeout(() => {
         const next = resolveSelectionAnchor();
         if (next) {
@@ -180,18 +185,29 @@ export function MobileReader({
     state.highlights.find((h) => h.id === id);
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      if (target.closest('[data-popover="highlight"]')) return;
+      // composedPath snapshots the ancestor chain at dispatch time —
+      // robust against post-dispatch DOM mutations (e.g. clicking the
+      // pencil button swaps it for a textarea before this handler
+      // runs, leaving target.closest() walking a detached subtree).
+      const path = (e.composedPath?.() ?? []) as EventTarget[];
+      const inPopover = path.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.dataset.popover === "highlight",
+      );
+      if (inPopover) return;
 
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) return;
 
-      const mark = target.closest<HTMLElement>("[data-h-id]");
-      if (mark && mark.dataset.hId) {
-        const h = highlightById(mark.dataset.hId);
+      const markNode = path.find(
+        (node): node is HTMLElement =>
+          node instanceof HTMLElement && node.dataset.hId !== undefined,
+      );
+      if (markNode && markNode.dataset.hId) {
+        const h = highlightById(markNode.dataset.hId);
         if (h) {
-          setActiveHl({ highlight: h, rect: mark.getBoundingClientRect() });
+          setActiveHl({ highlight: h, rect: markNode.getBoundingClientRect() });
           setSelAnchor(null);
           return;
         }

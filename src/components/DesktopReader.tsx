@@ -194,8 +194,13 @@ export function DesktopReader({
   // ignored — those are interactions with the toolbar itself.
   useEffect(() => {
     const onPointerUp = (e: PointerEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('[data-popover="highlight"]')) return;
+      const path = (e.composedPath?.() ?? []) as EventTarget[];
+      const inPopover = path.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.dataset.popover === "highlight",
+      );
+      if (inPopover) return;
       // Defer one tick so the browser has finalized the selection.
       window.setTimeout(() => {
         const next = resolveSelectionAnchor();
@@ -217,21 +222,33 @@ export function DesktopReader({
     state.highlights.find((h) => h.id === id);
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      // Clicks inside our own popovers are handled by their buttons.
-      if (target.closest('[data-popover="highlight"]')) return;
+      // composedPath snapshots the ancestor chain at dispatch time. By
+      // the time this bubble-phase handler runs, React may have already
+      // unmounted the clicked element (e.g. clicking the popover's
+      // pencil swaps in a textarea), so target.closest() would walk a
+      // detached node and miss the popover ancestor. Path-based check
+      // works regardless of post-dispatch DOM mutations.
+      const path = (e.composedPath?.() ?? []) as EventTarget[];
+      const inPopover = path.some(
+        (node) =>
+          node instanceof HTMLElement &&
+          node.dataset.popover === "highlight",
+      );
+      if (inPopover) return;
 
       // Tail of a drag-select that landed on a mark/text — let the
       // pointerup handler set the create popover; don't dismiss here.
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed) return;
 
-      const mark = target.closest<HTMLElement>("[data-h-id]");
-      if (mark && mark.dataset.hId) {
-        const h = highlightById(mark.dataset.hId);
+      const markNode = path.find(
+        (node): node is HTMLElement =>
+          node instanceof HTMLElement && node.dataset.hId !== undefined,
+      );
+      if (markNode && markNode.dataset.hId) {
+        const h = highlightById(markNode.dataset.hId);
         if (h) {
-          setActiveHl({ highlight: h, rect: mark.getBoundingClientRect() });
+          setActiveHl({ highlight: h, rect: markNode.getBoundingClientRect() });
           setSelAnchor(null);
           return;
         }
