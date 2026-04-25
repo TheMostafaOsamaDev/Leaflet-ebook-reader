@@ -6,11 +6,16 @@ import type { EpubBook } from "./epub/types";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useTweaks } from "./hooks/useTweaks";
 import {
+  deleteHighlight,
   loadBook,
+  saveHighlight,
+  updateHighlightNote,
   updateParagraphPosition,
   updateReadingPosition,
   type BookState,
+  type Highlight,
 } from "./store/library";
+import type { HighlightColor } from "./styles/tokens";
 import { FONT_SERIF_DISPLAY, FONT_STACKS, THEMES } from "./styles/tokens";
 import type { ActivePanel } from "./types/reader";
 
@@ -121,6 +126,106 @@ function App() {
     };
   }, []);
 
+  const createHighlight = useCallback(
+    async (input: {
+      chapter: number;
+      paragraphIndex: number;
+      charStart: number;
+      charEnd: number;
+      text: string;
+      color: HighlightColor;
+      note?: string;
+    }) => {
+      if (!loaded) return;
+      const saved = await saveHighlight(loaded.book.id, input);
+      setLoaded((prev) =>
+        prev
+          ? {
+              ...prev,
+              state: {
+                ...prev.state,
+                highlights: [...prev.state.highlights, saved],
+              },
+            }
+          : prev,
+      );
+    },
+    [loaded],
+  );
+
+  const removeHighlight = useCallback(
+    async (highlightId: string) => {
+      if (!loaded) return;
+      await deleteHighlight(loaded.book.id, highlightId);
+      setLoaded((prev) =>
+        prev
+          ? {
+              ...prev,
+              state: {
+                ...prev.state,
+                highlights: prev.state.highlights.filter(
+                  (h) => h.id !== highlightId,
+                ),
+              },
+            }
+          : prev,
+      );
+    },
+    [loaded],
+  );
+
+  const editHighlightNote = useCallback(
+    async (highlightId: string, note: string) => {
+      if (!loaded) return;
+      const trimmed = note.trim();
+      await updateHighlightNote(loaded.book.id, highlightId, trimmed);
+      setLoaded((prev) =>
+        prev
+          ? {
+              ...prev,
+              state: {
+                ...prev.state,
+                highlights: prev.state.highlights.map((h) =>
+                  h.id === highlightId
+                    ? { ...h, note: trimmed.length > 0 ? trimmed : undefined }
+                    : h,
+                ),
+              },
+            }
+          : prev,
+      );
+    },
+    [loaded],
+  );
+
+  // Jump from the sidebar to a highlight's exact spot. Reuses the
+  // existing chapter-mount scroll-to-paragraph effect by setting the
+  // resumeParagraph alongside the chapter switch.
+  const jumpToHighlight = useCallback(
+    (h: Highlight) => {
+      if (!loaded) return;
+      void updateReadingPosition(
+        loaded.book.id,
+        h.chapter,
+        loaded.book.chapters.length,
+      );
+      if (paragraphSaveTimer.current) {
+        clearTimeout(paragraphSaveTimer.current);
+        paragraphSaveTimer.current = null;
+      }
+      setLoaded((prev) =>
+        prev
+          ? {
+              ...prev,
+              currentChapter: h.chapter,
+              resumeParagraph: h.paragraphIndex,
+            }
+          : prev,
+      );
+    },
+    [loaded],
+  );
+
   const inReader = loaded !== null;
 
   return (
@@ -177,6 +282,10 @@ function App() {
           resumeParagraph={loaded!.resumeParagraph}
           onChapterChange={changeChapter}
           onParagraphChange={onParagraphChange}
+          onCreateHighlight={createHighlight}
+          onDeleteHighlight={removeHighlight}
+          onUpdateHighlightNote={editHighlightNote}
+          onJumpToHighlight={jumpToHighlight}
           onBack={closeBook}
         />
       ) : (
@@ -191,6 +300,10 @@ function App() {
           resumeParagraph={loaded!.resumeParagraph}
           onChapterChange={changeChapter}
           onParagraphChange={onParagraphChange}
+          onCreateHighlight={createHighlight}
+          onDeleteHighlight={removeHighlight}
+          onUpdateHighlightNote={editHighlightNote}
+          onJumpToHighlight={jumpToHighlight}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
           onBack={closeBook}

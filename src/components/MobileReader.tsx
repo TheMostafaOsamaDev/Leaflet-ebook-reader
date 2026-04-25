@@ -3,9 +3,19 @@ import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
 import { MobileSheet } from "./MobileSheet";
+import { SelectionPopover } from "./SelectionPopover";
 import type { EpubBook } from "../epub/types";
-import type { BookState } from "../store/library";
-import { FONT_STACKS, type Theme, type ThemeKey } from "../styles/tokens";
+import type { BookState, Highlight } from "../store/library";
+import {
+  FONT_STACKS,
+  type HighlightColor,
+  type Theme,
+  type ThemeKey,
+} from "../styles/tokens";
+import {
+  resolveSelectionAnchor,
+  type SelectionAnchor,
+} from "../lib/selectionAnchor";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
 import { ProgressOverlay } from "../panels/ProgressOverlay";
 import { SettingsPanel } from "../panels/SettingsPanel";
@@ -23,6 +33,18 @@ interface Props {
   resumeParagraph: number;
   onChapterChange: (order: number) => void;
   onParagraphChange: (idx: number) => void;
+  onCreateHighlight: (input: {
+    chapter: number;
+    paragraphIndex: number;
+    charStart: number;
+    charEnd: number;
+    text: string;
+    color: HighlightColor;
+    note?: string;
+  }) => void;
+  onDeleteHighlight: (id: string) => void;
+  onUpdateHighlightNote: (id: string, note: string) => void;
+  onJumpToHighlight: (h: Highlight) => void;
   onBack: () => void;
 }
 
@@ -52,6 +74,10 @@ export function MobileReader({
   resumeParagraph,
   onChapterChange,
   onParagraphChange,
+  onCreateHighlight,
+  onDeleteHighlight,
+  onUpdateHighlightNote,
+  onJumpToHighlight,
   onBack,
 }: Props) {
   const [showChrome, setShowChrome] = useState(true);
@@ -112,6 +138,48 @@ export function MobileReader({
   };
   const nextChapter = () => {
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
+  };
+
+  // Selection-driven highlight popover. Touch devices fire touchend (then
+  // selectionchange when the long-press selection stabilizes) — the
+  // selectionchange listener covers both desktop drag-selects and the
+  // mobile long-press flow.
+  const [selAnchor, setSelAnchor] = useState<SelectionAnchor | null>(null);
+  useEffect(() => {
+    const refresh = () => {
+      const next = resolveSelectionAnchor();
+      setSelAnchor((prev) => {
+        if (!next) return null;
+        if (
+          prev &&
+          prev.paragraphIndex === next.paragraphIndex &&
+          prev.charStart === next.charStart &&
+          prev.charEnd === next.charEnd
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    document.addEventListener("selectionchange", refresh);
+    return () => document.removeEventListener("selectionchange", refresh);
+  }, []);
+  const dismissSelection = () => {
+    setSelAnchor(null);
+    window.getSelection()?.removeAllRanges();
+  };
+  const createFromSelection = (color: HighlightColor, note?: string) => {
+    if (!selAnchor) return;
+    onCreateHighlight({
+      chapter: currentChapter,
+      paragraphIndex: selAnchor.paragraphIndex,
+      charStart: selAnchor.charStart,
+      charEnd: selAnchor.charEnd,
+      text: selAnchor.text,
+      color,
+      note: note?.trim() || undefined,
+    });
+    dismissSelection();
   };
 
   return (
@@ -200,6 +268,8 @@ export function MobileReader({
           chapter={chapter}
           chapterCount={chapterCount}
           theme={theme}
+          themeKey={themeKey}
+          highlights={state.highlights}
           fontFamily={t.fontFamily}
           fontSize={t.fontSize}
           lineHeight={t.lineHeight}
@@ -372,6 +442,12 @@ export function MobileReader({
                 themeKey={themeKey}
                 onClose={() => setSheet(null)}
                 highlights={state.highlights}
+                onJump={(h) => {
+                  onJumpToHighlight(h);
+                  setSheet(null);
+                }}
+                onDelete={onDeleteHighlight}
+                onUpdateNote={onUpdateHighlightNote}
               />
             )}
             {sheet === "settings" && (
@@ -403,6 +479,15 @@ export function MobileReader({
             )}
           </div>
         </MobileSheet>
+      )}
+      {selAnchor && (
+        <SelectionPopover
+          theme={theme}
+          anchor={selAnchor.rect}
+          onPick={(color) => createFromSelection(color)}
+          onAddNote={(color, note) => createFromSelection(color, note)}
+          onDismiss={dismissSelection}
+        />
       )}
     </div>
   );
