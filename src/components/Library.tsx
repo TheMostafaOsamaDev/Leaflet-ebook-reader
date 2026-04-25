@@ -3,13 +3,13 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type MouseEvent,
 } from "react";
 import { Icon } from "./Icon";
 import { BookCover } from "./BookCover";
 import { Toast, type ToastMessage } from "./Toast";
 import { EditBookModal } from "./EditBookModal";
+import { ContextMenu } from "./ContextMenu";
 import {
   clearLibrary,
   coverSrcFor,
@@ -20,7 +20,9 @@ import {
   rescanCover,
   setCoverFromFile,
   updateBookMeta,
+  updateBookStatus,
   type BookIndexEntry,
+  type BookStatus,
 } from "../store/library";
 import { paletteForId } from "../store/palette";
 import {
@@ -198,6 +200,34 @@ export function Library({ theme, layout, onOpen }: Props) {
     }
   };
 
+  // Right-click menu on shelf cards. The menu lives at the Library top
+  // level so its actions can reach the modal + delete handlers without
+  // threading more props through the layout components.
+  const [menu, setMenu] = useState<{
+    bookId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const menuBook =
+    menu !== null ? books.find((b) => b.id === menu.bookId) : undefined;
+  const openContextMenu = (bookId: string, x: number, y: number) =>
+    setMenu({ bookId, x, y });
+  const closeContextMenu = () => setMenu(null);
+  const onPickStatus = async (bookId: string, s: BookStatus) => {
+    try {
+      await updateBookStatus(bookId, s);
+      await refresh();
+      closeContextMenu();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const onMenuDelete = async (bookId: string, title: string) => {
+    closeContextMenu();
+    if (!confirm(`Remove “${title}” from your library?`)) return;
+    await onDelete(bookId);
+  };
+
   const layoutEl =
     layout === "mobile" ? (
       <MobileLibrary
@@ -213,6 +243,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         onClearAll={onClearAll}
         onDelete={onDelete}
         onEdit={(id) => setEditingId(id)}
+        onCardContextMenu={openContextMenu}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
       />
@@ -230,6 +261,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         onClearAll={onClearAll}
         onDelete={onDelete}
         onEdit={(id) => setEditingId(id)}
+        onCardContextMenu={openContextMenu}
         onRescanCover={onRescanCover}
         onSetCover={onSetCover}
       />
@@ -246,8 +278,27 @@ export function Library({ theme, layout, onOpen }: Props) {
           coverSrc={covers[editingBook.id]}
           onClose={() => setEditingId(null)}
           onSave={(patch) => onEditSave(editingBook.id, patch)}
+          onDelete={async () => {
+            await onDelete(editingBook.id);
+            setEditingId(null);
+          }}
           onSetCover={() => onSetCover(editingBook.id)}
           onRescanCover={() => onRescanCover(editingBook.id)}
+        />
+      )}
+      {menu && menuBook && (
+        <ContextMenu
+          theme={theme}
+          x={menu.x}
+          y={menu.y}
+          status={menuBook.status}
+          onPickStatus={(s) => onPickStatus(menuBook.id, s)}
+          onEdit={() => {
+            closeContextMenu();
+            setEditingId(menuBook.id);
+          }}
+          onDelete={() => onMenuDelete(menuBook.id, menuBook.title)}
+          onClose={closeContextMenu}
         />
       )}
     </>
@@ -267,6 +318,7 @@ interface LayoutProps {
   onClearAll: () => void;
   onDelete: (id: string) => void;
   onEdit: (id: string) => void;
+  onCardContextMenu: (id: string, x: number, y: number) => void;
   onRescanCover: (id: string) => void;
   onSetCover: (id: string) => void;
 }
@@ -284,6 +336,7 @@ function DesktopLibrary({
   onClearAll,
   onDelete,
   onEdit,
+  onCardContextMenu,
   onRescanCover,
   onSetCover,
 }: LayoutProps) {
@@ -488,8 +541,9 @@ function DesktopLibrary({
                   book={b}
                   coverSrc={covers[b.id]}
                   onOpen={() => onOpen(b.id)}
-                  onDelete={() => onDelete(b.id)}
-                  onEdit={() => onEdit(b.id)}
+                  onContextMenu={(x: number, y: number) =>
+                    onCardContextMenu(b.id, x, y)
+                  }
                   onRescanCover={() => onRescanCover(b.id)}
                   onSetCover={() => onSetCover(b.id)}
                 />
@@ -999,8 +1053,7 @@ function LibraryCard({
   book,
   coverSrc,
   onOpen,
-  onDelete,
-  onEdit,
+  onContextMenu,
   onRescanCover,
   onSetCover,
 }: {
@@ -1008,18 +1061,18 @@ function LibraryCard({
   book: BookIndexEntry;
   coverSrc?: string;
   onOpen: () => void;
-  onDelete: () => void;
-  onEdit: () => void;
+  onContextMenu: (x: number, y: number) => void;
   onRescanCover: () => void;
   onSetCover: () => void;
 }) {
   const hasRealCover = !!coverSrc;
-  const [hover, setHover] = useState(false);
   return (
     <div
       style={{ position: "relative" }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e.clientX, e.clientY);
+      }}
     >
       <div style={{ cursor: "pointer" }} onClick={onOpen}>
         <BookCover
@@ -1130,62 +1183,9 @@ function LibraryCard({
           )}
         </div>
       </div>
-      <div
-        style={{
-          position: "absolute",
-          top: 4,
-          right: 4,
-          display: "flex",
-          gap: 4,
-          opacity: hover ? 1 : 0,
-          transition: "opacity .12s",
-          pointerEvents: hover ? "auto" : "none",
-        }}
-      >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          title="Edit details"
-          aria-label="Edit details"
-          style={hoverIconBtn}
-          onFocus={() => setHover(true)}
-          onBlur={() => setHover(false)}
-        >
-          <Icon name="pencil" size={12} />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (confirm(`Remove “${book.title}” from your library?`))
-              onDelete();
-          }}
-          title="Remove from library"
-          aria-label="Remove from library"
-          style={hoverIconBtn}
-          onFocus={() => setHover(true)}
-          onBlur={() => setHover(false)}
-        >
-          <Icon name="close" size={12} />
-        </button>
-      </div>
     </div>
   );
 }
-
-const hoverIconBtn: CSSProperties = {
-  width: 24,
-  height: 24,
-  borderRadius: 12,
-  border: "none",
-  background: "rgba(0,0,0,0.5)",
-  color: "#fff",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
 
 function EmptyState({
   theme,

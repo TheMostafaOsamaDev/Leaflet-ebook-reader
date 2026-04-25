@@ -33,6 +33,8 @@ const ROOT = "leaflet";
 const BOOKS = `${ROOT}/books`;
 const INDEX = `${ROOT}/library.json`;
 
+export type BookStatus = "reading" | "finished" | "wishlist";
+
 export interface BookIndexEntry {
   id: string;
   title: string;
@@ -52,6 +54,10 @@ export interface BookIndexEntry {
   coverBust?: number;
   /** Free-form description shown in the library's edit dialog. */
   description?: string;
+  /** User-managed reading status. Drives the top-tabs filter and is set
+      via the right-click menu on a shelf card. Undefined for older books
+      that predate this field. */
+  status?: BookStatus;
 }
 
 export interface BookState {
@@ -432,6 +438,22 @@ export async function clearLibrary(): Promise<void> {
     }
   }
   await writeIndex({ version: 1, books: [] });
+}
+
+/**
+ * Set or clear the user-managed reading status. Pass undefined to clear.
+ */
+export async function updateBookStatus(
+  id: string,
+  status: BookStatus | undefined,
+): Promise<BookIndexEntry | null> {
+  const idx = await readIndex();
+  const entry = idx.books.find((b) => b.id === id);
+  if (!entry) return null;
+  if (status === undefined) delete entry.status;
+  else entry.status = status;
+  await writeIndex(idx);
+  return entry;
 }
 
 /**

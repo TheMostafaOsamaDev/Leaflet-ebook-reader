@@ -15,6 +15,7 @@ interface Props {
     description: string;
   }) => Promise<void> | void;
   onClose: () => void;
+  onDelete: () => Promise<void> | void;
   onSetCover: () => Promise<void> | void;
   onRescanCover: () => Promise<void> | void;
 }
@@ -25,6 +26,7 @@ export function EditBookModal({
   coverSrc,
   onSave,
   onClose,
+  onDelete,
   onSetCover,
   onRescanCover,
 }: Props) {
@@ -213,10 +215,31 @@ export function EditBookModal({
             padding: "12px 20px",
             borderTop: `0.5px solid ${theme.rule}`,
             display: "flex",
-            justifyContent: "flex-end",
+            alignItems: "center",
             gap: 8,
           }}
         >
+          <button
+            onClick={() => {
+              if (confirm(`Remove “${book.title}” from your library?`))
+                void onDelete();
+            }}
+            type="button"
+            style={{
+              padding: "8px 14px",
+              background: "transparent",
+              color: "#c04a3a",
+              border: "0.5px solid #c04a3a",
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: FONT_STACKS.sans,
+            }}
+          >
+            Remove from library
+          </button>
+          <div style={{ flex: 1 }} />
           <button onClick={onClose} style={ghostBtn(theme)} type="button">
             Cancel
           </button>
