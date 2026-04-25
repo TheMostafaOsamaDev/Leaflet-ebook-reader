@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DesktopReader } from "./components/DesktopReader";
 import { Library } from "./components/Library";
 import { MobileReader } from "./components/MobileReader";
@@ -9,6 +9,7 @@ import {
   deleteBookmark,
   loadBook,
   saveBookmark,
+  updateParagraphPosition,
   updateReadingPosition,
   type BookState,
 } from "./store/library";
@@ -19,6 +20,14 @@ interface Loaded {
   book: EpubBook;
   state: BookState;
   currentChapter: number;
+  /**
+   * Paragraph index to scroll to when the chapter mounts. Set from the
+   * persisted BookState on initial open, then reset to 0 whenever the user
+   * navigates between chapters (each new chapter starts at the top). The
+   * reader reads this only on chapter change — live scroll position lives
+   * in the reader's own ref.
+   */
+  resumeParagraph: number;
 }
 
 function App() {
@@ -46,7 +55,12 @@ function App() {
     setError(null);
     try {
       const { book, state } = await loadBook(id);
-      setLoaded({ book, state, currentChapter: state.currentChapter });
+      setLoaded({
+        book,
+        state,
+        currentChapter: state.currentChapter,
+        resumeParagraph: state.paragraphIndex,
+      });
       setActivePanel(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -74,11 +88,40 @@ function App() {
           clamped,
           prev.book.chapters.length,
         );
-        return { ...prev, currentChapter: clamped };
+        // New chapter starts at the top — clear any pending paragraph save
+        // and reset the resume hint so the reader scrolls to paragraph 0.
+        if (paragraphSaveTimer.current) {
+          clearTimeout(paragraphSaveTimer.current);
+          paragraphSaveTimer.current = null;
+        }
+        return { ...prev, currentChapter: clamped, resumeParagraph: 0 };
       });
     },
     [],
   );
+
+  // Debounce paragraph saves so we don't hammer disk on every scroll event.
+  const paragraphSaveTimer = useRef<number | null>(null);
+  const onParagraphChange = useCallback((idx: number) => {
+    if (paragraphSaveTimer.current)
+      clearTimeout(paragraphSaveTimer.current);
+    paragraphSaveTimer.current = window.setTimeout(() => {
+      paragraphSaveTimer.current = null;
+      setLoaded((prev) => {
+        if (!prev) return prev;
+        if (prev.state.paragraphIndex === idx) return prev;
+        void updateParagraphPosition(prev.book.id, idx);
+        return { ...prev, state: { ...prev.state, paragraphIndex: idx } };
+      });
+    }, 600);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (paragraphSaveTimer.current)
+        clearTimeout(paragraphSaveTimer.current);
+    };
+  }, []);
 
   const toggleBookmark = useCallback(async () => {
     if (!loaded) return;
@@ -177,7 +220,9 @@ function App() {
           book={loaded!.book}
           state={loaded!.state}
           currentChapter={loaded!.currentChapter}
+          resumeParagraph={loaded!.resumeParagraph}
           onChapterChange={changeChapter}
+          onParagraphChange={onParagraphChange}
           onToggleBookmark={toggleBookmark}
           onDeleteBookmark={removeBookmark}
           onBack={closeBook}
@@ -191,7 +236,9 @@ function App() {
           book={loaded!.book}
           state={loaded!.state}
           currentChapter={loaded!.currentChapter}
+          resumeParagraph={loaded!.resumeParagraph}
           onChapterChange={changeChapter}
+          onParagraphChange={onParagraphChange}
           onToggleBookmark={toggleBookmark}
           onDeleteBookmark={removeBookmark}
           activePanel={activePanel}

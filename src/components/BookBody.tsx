@@ -102,7 +102,11 @@ export function BookBody({
         </h2>
       </div>
       {paragraphs.map((p, i) => (
-        <p key={i} style={{ margin: "0 0 1.1em" }}>
+        <p
+          key={i}
+          data-p-index={i}
+          style={{ margin: "0 0 1.1em" }}
+        >
           {p.text}
         </p>
       ))}

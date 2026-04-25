@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
@@ -21,7 +21,9 @@ interface Props {
   book: EpubBook;
   state: BookState;
   currentChapter: number;
+  resumeParagraph: number;
   onChapterChange: (order: number) => void;
+  onParagraphChange: (idx: number) => void;
   onToggleBookmark: () => void;
   onDeleteBookmark: (id: string) => void;
   onBack: () => void;
@@ -50,13 +52,55 @@ export function MobileReader({
   book,
   state,
   currentChapter,
+  resumeParagraph,
   onChapterChange,
+  onParagraphChange,
   onToggleBookmark,
   onDeleteBookmark,
   onBack,
 }: Props) {
   const [showChrome, setShowChrome] = useState(true);
   const [sheet, setSheet] = useState<ActivePanel>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const resumeRef = useRef(resumeParagraph);
+  resumeRef.current = resumeParagraph;
+  const onParagraphChangeRef = useRef(onParagraphChange);
+  onParagraphChangeRef.current = onParagraphChange;
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = el.querySelector<HTMLElement>(
+      `[data-p-index="${resumeRef.current}"]`,
+    );
+    el.scrollTop = target ? target.offsetTop : 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapter, book.id]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let queued = false;
+    const handler = () => {
+      if (queued) return;
+      queued = true;
+      window.setTimeout(() => {
+        queued = false;
+        const ps = el.querySelectorAll<HTMLElement>("[data-p-index]");
+        if (ps.length === 0) return;
+        const containerTop = el.getBoundingClientRect().top;
+        let best = 0;
+        for (const p of ps) {
+          const offset = p.getBoundingClientRect().top - containerTop;
+          if (offset > 8) break;
+          best = Number(p.dataset.pIndex);
+        }
+        onParagraphChangeRef.current(best);
+      }, 250);
+    };
+    el.addEventListener("scroll", handler, { passive: true });
+    return () => el.removeEventListener("scroll", handler);
+  }, []);
 
   const chapter = book.chapters[currentChapter] ?? book.chapters[0];
   const chapterCount = book.chapters.length;
@@ -161,6 +205,7 @@ export function MobileReader({
       )}
 
       <div
+        ref={scrollRef}
         onClick={() => setShowChrome((s) => !s)}
         style={{
           flex: 1,

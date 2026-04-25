@@ -55,6 +55,9 @@ export interface BookIndexEntry {
 export interface BookState {
   bookId: string;
   currentChapter: number;
+  /** Index of the topmost-visible paragraph within currentChapter. Lets the
+      reader resume from the same scroll position, not just the chapter. */
+  paragraphIndex: number;
   /** Mutable over time — these drive the Bookmarks/Highlights panels.
       Empty on a freshly imported book. */
   bookmarks: Bookmark[];
@@ -125,7 +128,13 @@ async function readBookJson(id: string): Promise<EpubBook> {
 async function readState(id: string): Promise<BookState> {
   const path = `${bookDir(id)}/state.json`;
   if (!(await exists(path, { baseDir: BASE }))) {
-    return { bookId: id, currentChapter: 0, bookmarks: [], highlights: [] };
+    return {
+      bookId: id,
+      currentChapter: 0,
+      paragraphIndex: 0,
+      bookmarks: [],
+      highlights: [],
+    };
   }
   try {
     const raw = await readTextFile(path, { baseDir: BASE });
@@ -135,11 +144,20 @@ async function readState(id: string): Promise<BookState> {
       currentChapter: typeof parsed.currentChapter === "number"
         ? parsed.currentChapter
         : 0,
+      paragraphIndex: typeof parsed.paragraphIndex === "number"
+        ? parsed.paragraphIndex
+        : 0,
       bookmarks: Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [],
       highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
     };
   } catch {
-    return { bookId: id, currentChapter: 0, bookmarks: [], highlights: [] };
+    return {
+      bookId: id,
+      currentChapter: 0,
+      paragraphIndex: 0,
+      bookmarks: [],
+      highlights: [],
+    };
   }
 }
 
@@ -210,6 +228,7 @@ export async function importEpubBytes(
   await writeState({
     bookId: book.id,
     currentChapter: 0,
+    paragraphIndex: 0,
     bookmarks: [],
     highlights: [],
   });
@@ -436,6 +455,9 @@ export async function updateReadingPosition(
 ): Promise<void> {
   const state = await readState(id);
   state.currentChapter = currentChapter;
+  // A chapter switch resets paragraph progress for that chapter — the new
+  // chapter starts at the top.
+  state.paragraphIndex = 0;
   await writeState(state);
 
   const idx = await readIndex();
@@ -448,6 +470,20 @@ export async function updateReadingPosition(
     entry.lastReadAt = Date.now();
     await writeIndex(idx);
   }
+}
+
+/**
+ * Persist the topmost-visible paragraph index within the current chapter.
+ * Called as the user scrolls (debounced). Doesn't touch the library index —
+ * that's only for chapter-level progress / lastReadAt.
+ */
+export async function updateParagraphPosition(
+  id: string,
+  paragraphIndex: number,
+): Promise<void> {
+  const state = await readState(id);
+  state.paragraphIndex = paragraphIndex;
+  await writeState(state);
 }
 
 export async function saveBookmark(
