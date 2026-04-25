@@ -128,7 +128,11 @@ function App() {
 
   return (
     <div
-      dir={t.rtl && inReader ? "rtl" : "ltr"}
+      // Keep the app shell LTR — BookBody sets its own `dir` so the book
+      // content flips to RTL while the surrounding reader UI (settings
+      // panel, TOC, header, buttons) stays in its natural left-to-right
+      // orientation.
+      dir="ltr"
       style={{
         width: "100%",
         height: "100%",
