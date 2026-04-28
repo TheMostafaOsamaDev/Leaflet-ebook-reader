@@ -114,6 +114,7 @@ export function DesktopReader({
   // scroll, since the reader was just continuing through the chapter
   // edge. Cleared after the effect consumes it.
   const landAtEndRef = useRef(false);
+
   const handleParagraphChange = useCallback(
     (idx: number) => {
       livePara.current = idx;
@@ -139,6 +140,44 @@ export function DesktopReader({
   const nextChapter = () => {
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
   };
+
+  // Centered chapter-name toast. Fires whenever the chapter actually
+  // changes (skipping the initial mount, since the user just opened the
+  // book and already knows where they are). The `seq` field is bumped
+  // each fire so re-keying the React node restarts the CSS animation
+  // even when the user lands on the same chapter twice in a row.
+  const [chapterToast, setChapterToast] = useState<{
+    title: string;
+    number: number;
+    total: number;
+    seq: number;
+  } | null>(null);
+  const toastChapterRef = useRef(currentChapter);
+  const toastSeqRef = useRef(0);
+  const toastTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (toastChapterRef.current === currentChapter) return;
+    toastChapterRef.current = currentChapter;
+    toastSeqRef.current += 1;
+    setChapterToast({
+      title: chapter.title,
+      number: currentChapter + 1,
+      total: chapterCount,
+      seq: toastSeqRef.current,
+    });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    // Slightly longer than the CSS animation (1500ms) so the element
+    // unmounts after the fade-out finishes, not mid-animation.
+    toastTimerRef.current = window.setTimeout(() => {
+      setChapterToast(null);
+      toastTimerRef.current = null;
+    }, 1550);
+  }, [currentChapter, chapter.title, chapterCount]);
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Scroll to the live paragraph whenever the chapter changes or the
   // mode flips back to scroll — only active in scroll mode. Paginated
@@ -714,6 +753,9 @@ export function DesktopReader({
           {overscroll && (
             <OverscrollIndicator theme={theme} state={overscroll} />
           )}
+          {chapterToast && (
+            <ChapterToast key={chapterToast.seq} theme={theme} info={chapterToast} />
+          )}
 
           <div
             style={{
@@ -903,6 +945,81 @@ export function DesktopReader({
           onDismiss={() => setActiveHl(null)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Centered chapter-name pop-up. Fires on each chapter swap so the reader
+ * gets a clear "you're now on Chapter X" cue without needing to look at
+ * the chrome bar. Animation timing is owned by CSS (.leaflet-chapter-toast),
+ * the host just renders + unmounts.
+ */
+function ChapterToast({
+  theme,
+  info,
+}: {
+  theme: Theme;
+  info: { title: string; number: number; total: number };
+}) {
+  return (
+    <div
+      className="leaflet-chapter-toast"
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        // Initial transform is overridden by the keyframes; setting it
+        // here keeps SSR / pre-animation paint centered too.
+        transform: "translate(-50%, -50%)",
+        pointerEvents: "none",
+        zIndex: 50,
+        padding: "16px 28px",
+        borderRadius: 14,
+        background: theme.chrome,
+        color: theme.ink,
+        border: `0.5px solid ${theme.rule}`,
+        boxShadow: "0 16px 44px rgba(0,0,0,0.22)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        fontFamily: FONT_STACKS.sans,
+        textAlign: "center",
+        minWidth: 220,
+        maxWidth: 360,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.14em",
+          textTransform: "uppercase",
+          color: theme.muted,
+          marginBottom: 6,
+        }}
+      >
+        Chapter {info.number} of {info.total}
+      </div>
+      <div
+        style={{
+          fontFamily: titleFontFor(info.title),
+          fontSize: 18,
+          fontStyle: isArabicTitle(info.title) ? "normal" : "italic",
+          fontWeight: 500,
+          letterSpacing: "-0.01em",
+          lineHeight: 1.3,
+          color: theme.ink,
+          // Truncate very long titles to two lines so the toast doesn't
+          // turn into a full-screen takeover for chapters with long
+          // editorial subheads.
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
+      >
+        {info.title}
+      </div>
     </div>
   );
 }
