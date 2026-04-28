@@ -5,15 +5,31 @@ export type ActivePanel =
   | "settings"
   | "progress";
 
+/**
+ * How the chapter is laid out in the reader.
+ *
+ *  - `paginated-2`: two side-by-side columns that exactly fill the page.
+ *    No vertical scroll; left/right arrows flip pages.
+ *  - `paginated-1`: single column filling the page, paginated.
+ *  - `scroll`: classic vertical scroll, the entire chapter in one column.
+ *
+ * Position is preserved across modes via the persisted paragraph index —
+ * switching modes lands the reader on the same paragraph it was last
+ * showing, mapped onto whichever layout is active.
+ */
+export type ReadingMode = "paginated-2" | "paginated-1" | "scroll";
+
 export interface Tweaks {
   theme: "light" | "sepia" | "dark" | "oled";
   fontFamily: "serif" | "sans" | "dyslexic" | "cairo" | "lateef" | "tajawal";
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
-  textAlign: "left" | "justify" | "right";
-  rtl: boolean;
-  columns: 1 | 2;
-  /** Reading column width in px. Clamps the book body inside this width. */
+  /** "auto" derives alignment from the book's language: justify in LTR
+      books, right in RTL books. The explicit values let the user override. */
+  textAlign: "auto" | "left" | "justify" | "right";
+  readingMode: ReadingMode;
+  /** Reading column width in px. Caps the book body in scroll mode; ignored
+      in paginated modes where columns fill the container. */
   pageWidth: number;
 }

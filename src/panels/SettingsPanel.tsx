@@ -305,6 +305,7 @@ export function SettingsPanel({
           value={t.textAlign}
           onChange={(v) => setTweak("textAlign", v)}
           options={[
+            { value: "auto", label: <span style={{ fontSize: 11 }}>Auto</span> },
             { value: "left", label: <span style={{ fontSize: 14 }}>⯇</span> },
             {
               value: "justify",
@@ -318,41 +319,33 @@ export function SettingsPanel({
         />
       </Field>
 
-      <Field label="Columns" theme={theme}>
-        <SegRow<"1" | "2">
+      <Field label="Reading mode" theme={theme}>
+        <SegRow<Tweaks["readingMode"]>
           theme={theme}
-          value={String(t.columns) as "1" | "2"}
-          onChange={(v) => setTweak("columns", v === "2" ? 2 : 1)}
+          value={t.readingMode}
+          onChange={(v) => setTweak("readingMode", v)}
           options={[
-            { value: "1", label: "Single" },
-            { value: "2", label: "Two" },
+            { value: "paginated-2", label: "Two pages" },
+            { value: "paginated-1", label: "Single page" },
+            { value: "scroll", label: "Scroll" },
           ]}
         />
       </Field>
 
-      <Field label={`Page width · ${t.pageWidth}px`} theme={theme}>
-        <input
-          type="range"
-          min={480}
-          max={1200}
-          step={20}
-          value={t.pageWidth}
-          onChange={(e) => setTweak("pageWidth", +e.target.value)}
-          style={{ width: "100%", color: theme.ink }}
-        />
-      </Field>
+      {t.readingMode === "scroll" && (
+        <Field label={`Page width · ${t.pageWidth}px`} theme={theme}>
+          <input
+            type="range"
+            min={480}
+            max={1200}
+            step={20}
+            value={t.pageWidth}
+            onChange={(e) => setTweak("pageWidth", +e.target.value)}
+            style={{ width: "100%", color: theme.ink }}
+          />
+        </Field>
+      )}
 
-      <Field label="Language direction" theme={theme}>
-        <SegRow<"ltr" | "rtl">
-          theme={theme}
-          value={t.rtl ? "rtl" : "ltr"}
-          onChange={(v) => setTweak("rtl", v === "rtl")}
-          options={[
-            { value: "ltr", label: "LTR · English" },
-            { value: "rtl", label: "RTL · عربي" },
-          ]}
-        />
-      </Field>
     </PanelShell>
   );
 }

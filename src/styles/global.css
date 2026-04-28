@@ -165,6 +165,23 @@ input:focus-visible,
   outline-offset: 2px;
 }
 
+/* Chapter-mount transition. Used by the reader to mark a chapter swap so
+   the user gets a tiny visual cue that they've moved between chapters —
+   the content fades in and rises a few pixels. */
+@keyframes leaflet-chapter-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.leaflet-chapter-enter {
+  animation: leaflet-chapter-enter 280ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;

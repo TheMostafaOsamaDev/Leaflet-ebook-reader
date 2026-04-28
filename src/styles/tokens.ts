@@ -148,6 +148,19 @@ export function isArabicTitle(title: string): boolean {
 export function titleFontFor(title: string): string {
   return isArabicTitle(title) ? FONT_STACKS.sans : FONT_SERIF_DISPLAY;
 }
+
+// BCP-47 language subtags whose script is right-to-left. We only check the
+// primary subtag (before the first hyphen), so `ar-EG`, `fa-IR`, etc. all
+// resolve correctly.
+const RTL_LANGS = new Set(["ar", "he", "fa", "ur", "ps", "sd", "ug", "yi"]);
+
+/** True when the book's language tag indicates an RTL script. Used to
+ *  auto-flip column / text direction without making the user toggle it. */
+export function isRtlLanguage(language: string | undefined | null): boolean {
+  if (!language) return false;
+  const primary = language.toLowerCase().split(/[-_]/)[0];
+  return RTL_LANGS.has(primary);
+}
 export const FONT_ARABIC =
   '"Amiri", "Noto Naskh Arabic", "Scheherazade New", serif';
 
