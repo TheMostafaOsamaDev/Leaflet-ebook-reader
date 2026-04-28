@@ -440,6 +440,10 @@ export async function clearLibrary(): Promise<void> {
 
 /**
  * Set or clear the user-managed reading status. Pass undefined to clear.
+ *
+ * Marking a book as "finished" also pins its progress to 100% — otherwise a
+ * book the reader hasn't actually scrolled to the end of would still show a
+ * partial progress bar in the Finished tab, which reads as a bug.
  */
 export async function updateBookStatus(
   id: string,
@@ -450,6 +454,7 @@ export async function updateBookStatus(
   if (!entry) return null;
   if (status === undefined) delete entry.status;
   else entry.status = status;
+  if (status === "finished") entry.progress = 1;
   await writeIndex(idx);
   return entry;
 }
