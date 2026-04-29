@@ -256,6 +256,43 @@ export function DesktopReader({
     paginatedApiRef.current = api;
   }, []);
 
+  // Ref on the paginated wrapper so the wheel listener can preventDefault
+  // (must be non-passive) without touching the scroll container.
+  const paginatedWrapRef = useRef<HTMLDivElement>(null);
+
+  // Wheel-to-flip-page in paginated modes. A short cooldown prevents a
+  // single trackpad gesture from skipping multiple pages in one swipe.
+  // At a chapter boundary (first/last page) it falls through to chapter
+  // navigation so the user can keep scrolling through the book.
+  useEffect(() => {
+    if (!isPaginated) return;
+    const el = paginatedWrapRef.current;
+    if (!el) return;
+    let cooldown = false;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 4) return; // ignore minor trackpad noise
+      e.preventDefault();
+      if (cooldown) return;
+      cooldown = true;
+      window.setTimeout(() => { cooldown = false; }, 380);
+      const api = paginatedApiRef.current;
+      if (e.deltaY > 0) {
+        // Forward — next page, or next chapter at the last page.
+        if (!api?.nextPage()) {
+          if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
+        }
+      } else {
+        // Backward — prev page, or prev chapter at the first page.
+        if (!api?.prevPage()) {
+          if (currentChapter > 0) onChapterChange(currentChapter - 1);
+        }
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPaginated, currentChapter, chapterCount, onChapterChange]);
+
   // Overscroll state: when the reader is in scroll mode and the user
   // keeps scrolling past the chapter's edge, a small indicator builds up
   // at the relevant edge until a threshold flips chapters. Lets the user
@@ -685,6 +722,7 @@ export function DesktopReader({
         >
           {isPaginated ? (
             <div
+              ref={paginatedWrapRef}
               style={{
                 flex: 1,
                 padding: "60px 80px 30px",
