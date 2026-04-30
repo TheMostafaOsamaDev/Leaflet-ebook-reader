@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DesktopReader } from "./components/DesktopReader";
+import { ImportProgress } from "./components/ImportProgress";
 import { Library } from "./components/Library";
 import { MobileReader } from "./components/MobileReader";
 import type { EpubBook } from "./epub/types";
@@ -309,6 +310,10 @@ function App() {
           onBack={closeBook}
         />
       )}
+      {/* Mounted at the app root so a docx import keeps showing across the
+          Library → Reader transition (e.g. user clicks "Continue in
+          background" then opens an existing book while the import finishes). */}
+      <ImportProgress theme={theme} />
     </div>
   );
 }

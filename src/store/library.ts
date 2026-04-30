@@ -27,6 +27,15 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { parseEpub } from "../epub/parser";
 import type { EpubBook } from "../epub/types";
+import { docxToEpubBytes } from "../docx/import";
+import {
+  beginStep,
+  completeStep,
+  failStep,
+  finishImport,
+  getState as getImportProgressState,
+  startImport,
+} from "./importProgress";
 
 const BASE = BaseDirectory.AppData;
 const ROOT = "leaflet";
@@ -215,6 +224,95 @@ export async function pickAndImportEpub(): Promise<BookIndexEntry | null> {
   // so we don't need $HOME / $DOCUMENT in the fs scope.
   const bytes = await readFile(picked);
   return importEpubBytes(bytes);
+}
+
+/**
+ * Prompt for a .docx, convert it to EPUB (chapters split off the doc's
+ * heading levels, first embedded image becomes the cover, language and
+ * direction inherited from the doc), and persist it like any EPUB. Returns
+ * the index entry, or null if the user cancelled the picker.
+ *
+ * The pipeline reports progress through the import-progress store — the
+ * mounted ImportProgress component renders a stepper modal + minimized
+ * dock from that store. Closing the modal mid-run does not cancel: the
+ * promise keeps resolving in the background.
+ */
+export async function pickAndImportDocx(): Promise<BookIndexEntry | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Word document", extensions: ["docx"] }],
+  });
+  if (!picked) return null;
+
+  // Refuse to start a second import while one is still running (the
+  // progress store is module-scoped, so it survives Library unmount/remount
+  // when the user reads a book mid-import). Without this guard, starting a
+  // new run would clobber the in-flight one's progress UI.
+  const current = getImportProgressState();
+  if (current.active && current.finishedAt === null) return null;
+
+  const fallbackTitle = filenameTitle(picked);
+
+  startImport([
+    { id: "read", label: "Reading file" },
+    { id: "lang", label: "Detecting language" },
+    { id: "convert", label: "Converting document" },
+    { id: "chapters", label: "Detecting chapters" },
+    { id: "epub", label: "Building EPUB" },
+    { id: "save", label: "Adding to library" },
+  ]);
+
+  let currentStepId = "read";
+  try {
+    beginStep("read");
+    const bytes = await readFile(picked);
+    completeStep("read");
+
+    const { epubBytes } = await docxToEpubBytes(bytes, fallbackTitle, {
+      lang: () => {
+        currentStepId = "lang";
+        beginStep("lang");
+      },
+      convert: () => {
+        completeStep("lang");
+        currentStepId = "convert";
+        beginStep("convert");
+      },
+      chapters: () => {
+        completeStep("convert");
+        currentStepId = "chapters";
+        beginStep("chapters");
+      },
+      epub: () => {
+        completeStep("chapters");
+        currentStepId = "epub";
+        beginStep("epub");
+      },
+    });
+    completeStep("epub");
+
+    currentStepId = "save";
+    beginStep("save");
+    const entry = await importEpubBytes(epubBytes);
+    completeStep("save");
+    finishImport(entry.id);
+    return entry;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    failStep(currentStepId, message);
+    throw err;
+  }
+}
+
+/** Pull a reasonable display title out of a file path: drop the directory
+ *  portion and the .docx extension, then collapse underscores/dashes to
+ *  spaces. Used when the doc has no leading heading we can borrow. */
+function filenameTitle(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  const stem = base.replace(/\.docx$/i, "");
+  const cleaned = stem.replace(/[_-]+/g, " ").trim();
+  return cleaned.length > 0 ? cleaned : "Untitled";
 }
 
 export async function importEpubBytes(

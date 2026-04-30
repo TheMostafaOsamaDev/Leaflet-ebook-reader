@@ -10,6 +10,7 @@ import {
   clearLibrary,
   coverSrcFor,
   listBooks,
+  pickAndImportDocx,
   pickAndImportEpub,
   pickAndImportFolder,
   deleteBook,
@@ -112,6 +113,20 @@ export function Library({ theme, layout, onOpen }: Props) {
       await clearLibrary();
       await refresh();
       showToast("info", `Cleared ${n} book${n === 1 ? "" : "s"}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const onImportDocx = async () => {
+    if (importing) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const entry = await pickAndImportDocx();
+      if (entry) await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -257,6 +272,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         importing={importing}
         onOpen={onOpen}
         onImport={onImport}
+        onImportDocx={onImportDocx}
         onImportFolder={onImportFolder}
         onClearAll={onClearAll}
         onDelete={(id) => {
@@ -276,6 +292,7 @@ export function Library({ theme, layout, onOpen }: Props) {
         importing={importing}
         onOpen={onOpen}
         onImport={onImport}
+        onImportDocx={onImportDocx}
         onImportFolder={onImportFolder}
         onClearAll={onClearAll}
         onDelete={(id) => {
@@ -355,6 +372,7 @@ interface LayoutProps {
   importing: boolean;
   onOpen: (id: string) => void;
   onImport: () => void;
+  onImportDocx: () => void;
   onImportFolder: () => void;
   onClearAll: () => void;
   onDelete: (id: string) => void;
@@ -371,6 +389,7 @@ function DesktopLibrary({
   importing,
   onOpen,
   onImport,
+  onImportDocx,
   onImportFolder,
   onClearAll,
   onDelete,
@@ -461,6 +480,18 @@ function DesktopLibrary({
           style={{ marginRight: 8 }}
         >
           Import folder
+        </Button>
+        <Button
+          theme={theme}
+          variant="outline"
+          size="sm"
+          onClick={onImportDocx}
+          disabled={importing}
+          leadingIcon={<Icon name="doc" size={13} />}
+          title="Convert a Word document to EPUB on import"
+          style={{ marginRight: 8 }}
+        >
+          Import .docx
         </Button>
         <Button
           theme={theme}
@@ -562,6 +593,7 @@ function MobileLibrary({
   importing,
   onOpen,
   onImport,
+  onImportDocx,
   onImportFolder,
   onClearAll,
 }: LayoutProps) {
@@ -652,6 +684,27 @@ function MobileLibrary({
             }}
           >
             <Icon name="folder" size={16} />
+          </button>
+          <button
+            onClick={onImportDocx}
+            disabled={importing}
+            aria-label="Import Word document"
+            title="Convert a Word document to EPUB on import"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              border: `0.5px solid ${theme.rule}`,
+              background: "transparent",
+              color: theme.ink,
+              cursor: importing ? "progress" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: importing ? 0.6 : 1,
+            }}
+          >
+            <Icon name="doc" size={16} />
           </button>
           <button
             onClick={onImport}
