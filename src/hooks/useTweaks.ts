@@ -11,7 +11,6 @@ export const DEFAULT_TWEAKS: Tweaks = {
   letterSpacing: 0,
   textAlign: "auto",
   readingMode: "paginated-2",
-  pageWidth: 900,
   contentWidth: 100,
   mobileTapNav: true,
 };
@@ -35,6 +34,11 @@ function load(): Tweaks {
     // spread merge with DEFAULT_TWEAKS doesn't keep a stale boolean.
     if (parsed && typeof parsed === "object" && "rtl" in parsed) {
       delete parsed.rtl;
+    }
+    // pageWidth (px scroll-mode cap) was superseded by contentWidth (%);
+    // strip it so the spread doesn't keep a stale field.
+    if (parsed && typeof parsed === "object" && "pageWidth" in parsed) {
+      delete parsed.pageWidth;
     }
     return { ...DEFAULT_TWEAKS, ...parsed };
   } catch {

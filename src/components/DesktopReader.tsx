@@ -792,7 +792,6 @@ export function DesktopReader({
                   letterSpacing={t.letterSpacing}
                   textAlign={t.textAlign}
                   rtl={rtl}
-                  maxWidth={t.pageWidth}
                   widthPercent={t.contentWidth}
                   highlights={state.highlights}
                 />
