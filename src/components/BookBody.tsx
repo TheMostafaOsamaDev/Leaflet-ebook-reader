@@ -30,6 +30,10 @@ interface Props {
       title font choice. */
   rtl: boolean;
   maxWidth?: number;
+  /** Width of the body column as a percentage of the container (50–100).
+      Combines with `maxWidth` (px cap) so the column scales with the
+      viewport but never exceeds the configured cap. */
+  widthPercent?: number;
   /** Highlights that anchor into this chapter. BookBody renders any
       whose paragraphIndex matches the displayed paragraph index. */
   highlights?: Highlight[];
@@ -83,8 +87,10 @@ export function BookBody({
   textAlign,
   rtl,
   maxWidth = 680,
+  widthPercent = 100,
   highlights = [],
 }: Props) {
+  const clampedPercent = Math.max(50, Math.min(100, widthPercent));
   const resolvedAlign =
     textAlign === "auto" ? (rtl ? "right" : "justify") : textAlign;
   // BookBody renders a flat linear flow. Multi-column layout (paginated or
@@ -96,6 +102,7 @@ export function BookBody({
     lineHeight,
     letterSpacing: `${letterSpacing}em`,
     color: theme.ink,
+    width: `${clampedPercent}%`,
     maxWidth,
     margin: "0 auto",
   };

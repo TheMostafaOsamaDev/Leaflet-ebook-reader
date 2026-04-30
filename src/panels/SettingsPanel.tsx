@@ -308,6 +308,18 @@ export function SettingsPanel({
         />
       </Field>
 
+      <Field label={`Content width · ${t.contentWidth}%`} theme={theme}>
+        <input
+          type="range"
+          min={50}
+          max={100}
+          step={1}
+          value={t.contentWidth}
+          onChange={(e) => setTweak("contentWidth", +e.target.value)}
+          style={{ width: "100%", color: theme.ink }}
+        />
+      </Field>
+
       <Field label="Alignment" theme={theme}>
         <SegRow<Tweaks["textAlign"]>
           theme={theme}

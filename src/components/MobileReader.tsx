@@ -390,6 +390,7 @@ export function MobileReader({
           // or >360px page width would just overflow.
           rtl={isRtlLanguage(book.language)}
           maxWidth={360}
+          widthPercent={t.contentWidth}
         />
       </div>
 

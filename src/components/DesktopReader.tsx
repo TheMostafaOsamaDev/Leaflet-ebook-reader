@@ -785,6 +785,7 @@ export function DesktopReader({
                   textAlign={t.textAlign}
                   rtl={rtl}
                   maxWidth={t.pageWidth}
+                  widthPercent={t.contentWidth}
                   highlights={state.highlights}
                 />
               </div>

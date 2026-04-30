@@ -32,6 +32,12 @@ export interface Tweaks {
   /** Reading column width in px. Caps the book body in scroll mode; ignored
       in paginated modes where columns fill the container. */
   pageWidth: number;
+  /** Reading column width as a percentage of the available container width
+      (50–100). Applies in every reading mode on both desktop and mobile,
+      letting the user shrink or expand the text column to match their
+      screen. Combines with `pageWidth` (which still caps the absolute px
+      width in scroll mode). */
+  contentWidth: number;
   /** Mobile only — tap the right edge of the book to scroll forward a
       page-worth, the left edge to scroll back. The center third still
       toggles the reader chrome. Ignored on desktop. */
