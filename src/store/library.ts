@@ -549,11 +549,9 @@ export async function clearLibrary(): Promise<void> {
   const idx = await readIndex();
   for (const b of idx.books) {
     try {
-      const entries = await readDir(bookDir(b.id), { baseDir: BASE });
-      for (const e of entries) {
-        await remove(`${bookDir(b.id)}/${e.name}`, { baseDir: BASE });
-      }
-      await remove(bookDir(b.id), { baseDir: BASE });
+      // Recursive — books may contain an `images/` subdir of in-flow art
+      // that the per-file remove path wouldn't reach.
+      await remove(bookDir(b.id), { baseDir: BASE, recursive: true });
     } catch {
       // best-effort — a missing dir shouldn't stop the sweep
     }
@@ -606,12 +604,9 @@ export async function deleteBook(id: string): Promise<void> {
   idx.books = idx.books.filter((b) => b.id !== id);
   await writeIndex(idx);
   try {
-    // Recursive remove — both files under dir, then the dir itself.
-    const entries = await readDir(bookDir(id), { baseDir: BASE });
-    for (const e of entries) {
-      await remove(`${bookDir(id)}/${e.name}`, { baseDir: BASE });
-    }
-    await remove(bookDir(id), { baseDir: BASE });
+    // Recursive — books with in-flow images live under an `images/` subdir
+    // that a per-file sweep wouldn't reach.
+    await remove(bookDir(id), { baseDir: BASE, recursive: true });
   } catch {
     // best-effort — missing files shouldn't block a delete from the index
   }
