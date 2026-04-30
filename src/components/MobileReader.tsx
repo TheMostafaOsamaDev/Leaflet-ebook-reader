@@ -491,6 +491,12 @@ export function MobileReader({
                   onChapterChange(order);
                   setSheet(null);
                 }}
+                // Fluid layout inside the sheet — phone widths vary
+                // (360px to 430px+) and the desktop 340px column would
+                // leave dead space on the right. The sheet itself owns
+                // the rounded chrome, so we drop the panel's side border.
+                width="100%"
+                side={undefined}
               />
             )}
             {sheet === "highlights" && (
@@ -505,6 +511,8 @@ export function MobileReader({
                 }}
                 onDelete={onDeleteHighlight}
                 onUpdateNote={onUpdateHighlightNote}
+                width="100%"
+                side={undefined}
               />
             )}
             {sheet === "settings" && (
@@ -514,6 +522,8 @@ export function MobileReader({
                 t={t}
                 setTweak={setTweak}
                 onClose={() => setSheet(null)}
+                width="100%"
+                side={undefined}
               />
             )}
             {sheet === "progress" && (

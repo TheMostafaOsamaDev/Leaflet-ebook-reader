@@ -19,6 +19,8 @@ interface Props {
   onJump?: (h: Highlight) => void;
   onDelete?: (id: string) => void;
   onUpdateNote?: (id: string, note: string) => void;
+  width?: number | string;
+  side?: "left" | "right";
 }
 
 export function HighlightsPanel({
@@ -29,6 +31,8 @@ export function HighlightsPanel({
   onJump,
   onDelete,
   onUpdateNote,
+  width,
+  side = "left",
 }: Props) {
   // Most recent first — matches the order people expect when scanning
   // for "what did I just save?"
@@ -44,6 +48,8 @@ export function HighlightsPanel({
       }
       onClose={onClose}
       icon={<Icon name="highlight" size={14} />}
+      width={width}
+      side={side}
     >
       {sorted.length === 0 ? (
         <Empty theme={theme} />

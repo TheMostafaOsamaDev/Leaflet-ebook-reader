@@ -8,9 +8,11 @@ interface PanelShellProps {
   subtitle?: string;
   onClose?: () => void;
   children: ReactNode;
-  width?: number;
+  width?: number | string;
   actions?: ReactNode;
   icon?: ReactNode;
+  // Side border faces the reader column on desktop. Omit on mobile —
+  // the bottom sheet already renders its own chrome edge-to-edge.
   side?: "left" | "right";
 }
 
@@ -23,12 +25,14 @@ export function PanelShell({
   width = 340,
   actions,
   icon,
-  side = "left",
+  side,
 }: PanelShellProps) {
   const borderSide =
     side === "left"
       ? { borderRight: `0.5px solid ${theme.rule}` }
-      : { borderLeft: `0.5px solid ${theme.rule}` };
+      : side === "right"
+      ? { borderLeft: `0.5px solid ${theme.rule}` }
+      : {};
   return (
     <div
       style={{

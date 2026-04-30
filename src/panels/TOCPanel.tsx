@@ -10,6 +10,8 @@ interface Props {
   chapters: EpubChapter[];
   currentChapter: number;
   onJump?: (order: number) => void;
+  width?: number | string;
+  side?: "left" | "right";
 }
 
 export function TOCPanel({
@@ -19,6 +21,8 @@ export function TOCPanel({
   chapters,
   currentChapter,
   onJump,
+  width,
+  side = "left",
 }: Props) {
   return (
     <PanelShell
@@ -27,6 +31,8 @@ export function TOCPanel({
       subtitle={bookTitle}
       onClose={onClose}
       icon={<Icon name="list" size={15} />}
+      width={width}
+      side={side}
     >
       <div style={{ padding: "8px 6px" }}>
         {chapters.map((c) => {
