@@ -396,7 +396,6 @@ export function MobileReader({
           // page width) — the screen is narrow enough that paginated columns
           // or >360px page width would just overflow.
           rtl={isRtlLanguage(book.language)}
-          maxWidth={360}
           widthPercent={t.contentWidth}
         />
       </div>

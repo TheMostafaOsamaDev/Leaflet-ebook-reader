@@ -353,20 +353,6 @@ export function SettingsPanel({
         />
       </Field>
 
-      {t.readingMode === "scroll" && (
-        <Field label={`Page width · ${t.pageWidth}px`} theme={theme}>
-          <input
-            type="range"
-            min={480}
-            max={1200}
-            step={20}
-            value={t.pageWidth}
-            onChange={(e) => setTweak("pageWidth", +e.target.value)}
-            style={{ width: "100%", color: theme.ink }}
-          />
-        </Field>
-      )}
-
       {mobile && (
         <Field label="Tap to turn pages" theme={theme}>
           <SegRow<"on" | "off">

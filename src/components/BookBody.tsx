@@ -29,10 +29,9 @@ interface Props {
       language tag by the caller. Drives `dir`, alignment fallback, and
       title font choice. */
   rtl: boolean;
-  maxWidth?: number;
   /** Width of the body column as a percentage of the container (50–100).
-      Combines with `maxWidth` (px cap) so the column scales with the
-      viewport but never exceeds the configured cap. */
+      The reader's own padding frames the column, so 100% means the column
+      fills the available container width. */
   widthPercent?: number;
   /** Highlights that anchor into this chapter. BookBody renders any
       whose paragraphIndex matches the displayed paragraph index. */
@@ -86,7 +85,6 @@ export function BookBody({
   letterSpacing,
   textAlign,
   rtl,
-  maxWidth = 680,
   widthPercent = 100,
   highlights = [],
 }: Props) {
@@ -103,11 +101,6 @@ export function BookBody({
     letterSpacing: `${letterSpacing}em`,
     color: theme.ink,
     width: `${clampedPercent}%`,
-    // Cap with the px `maxWidth` only when the user has scaled the column
-    // down. At 100% the user is asking for "use the whole container minus
-    // the reader's padding" — the px cap would silently override that and
-    // leave a gutter on wide screens, which was the original bug.
-    maxWidth: clampedPercent >= 100 ? undefined : maxWidth,
     margin: "0 auto",
   };
 
