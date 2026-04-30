@@ -16,6 +16,8 @@ interface Props {
   t: Tweaks;
   setTweak: <K extends keyof Tweaks>(key: K, value: Tweaks[K]) => void;
   onClose?: () => void;
+  width?: number | string;
+  side?: "left" | "right";
 }
 
 const THEME_SWATCHES: ReadonlyArray<[ThemeKey, string, string]> = [
@@ -139,6 +141,8 @@ export function SettingsPanel({
   t,
   setTweak,
   onClose,
+  width,
+  side = "right",
 }: Props) {
   return (
     <PanelShell
@@ -147,7 +151,8 @@ export function SettingsPanel({
       subtitle="Appearance & typography"
       onClose={onClose}
       icon={<Icon name="type" size={14} />}
-      side="right"
+      width={width}
+      side={side}
     >
       <Field label="Theme" theme={theme}>
         <div
