@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "./Icon";
 import { BookBody } from "./BookBody";
+import { PaginatedView, type PaginatedAPI } from "./PaginatedView";
 import { SelectionPopover } from "./SelectionPopover";
 import { HighlightActionPopover } from "./HighlightActionPopover";
 import type { EpubBook } from "../epub/types";
@@ -14,6 +15,7 @@ import {
 import {
   FONT_STACKS,
   isArabicTitle,
+  isRtlLanguage,
   titleFontFor,
   type Theme,
   type ThemeKey,
@@ -89,13 +91,41 @@ export function DesktopReader({
   onBack,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Stash the latest resumeParagraph in a ref so the chapter-change effect
-  // can read it without re-running on every paragraph save.
-  const resumeRef = useRef(resumeParagraph);
-  resumeRef.current = resumeParagraph;
-  // Same trick for onParagraphChange — keeps the scroll listener stable.
-  const onParagraphChangeRef = useRef(onParagraphChange);
-  onParagraphChangeRef.current = onParagraphChange;
+  const mode = t.readingMode;
+  const isPaginated = mode !== "scroll";
+  const paginatedColumns: 1 | 2 = mode === "paginated-2" ? 2 : 1;
+  const rtl = isRtlLanguage(book.language);
+
+  // The live paragraph for the current chapter — updated by both the
+  // scroll listener and PaginatedView. Used so that switching reading
+  // modes mid-chapter lands the user on the same paragraph they were
+  // reading, not on the chapter's resume hint (which only updates on
+  // chapter switch / highlight jump).
+  const livePara = useRef(resumeParagraph);
+  const lastChapterRef = useRef(currentChapter);
+  if (lastChapterRef.current !== currentChapter) {
+    lastChapterRef.current = currentChapter;
+    livePara.current = resumeParagraph;
+  }
+
+  // Set when we step backward into the previous chapter via scroll-up
+  // overscroll. The chapter-mount effect picks this up and lands the
+  // viewport at the bottom of the new chapter — natural for an upward
+  // scroll, since the reader was just continuing through the chapter
+  // edge. Cleared after the effect consumes it.
+  const landAtEndRef = useRef(false);
+
+  const handleParagraphChange = useCallback(
+    (idx: number) => {
+      livePara.current = idx;
+      onParagraphChange(idx);
+    },
+    [onParagraphChange],
+  );
+  // Same ref trick for the scroll listener — keeps the listener stable
+  // while still calling the freshest handler.
+  const onParagraphChangeRef = useRef(handleParagraphChange);
+  onParagraphChangeRef.current = handleParagraphChange;
   const chapter = book.chapters[currentChapter] ?? book.chapters[0];
   const chapterCount = book.chapters.length;
   const pct = chapterCount > 0
@@ -111,14 +141,75 @@ export function DesktopReader({
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
   };
 
-  // Scroll to the resume paragraph whenever the chapter changes. Runs
-  // once per chapter mount; later live scrolling doesn't trigger this
-  // because resumeParagraph isn't in the deps.
+  // Centered chapter-name toast. Fires whenever the chapter actually
+  // changes (skipping the initial mount, since the user just opened the
+  // book and already knows where they are). The `seq` field is bumped
+  // each fire so re-keying the React node restarts the CSS animation
+  // even when the user lands on the same chapter twice in a row.
+  const [chapterToast, setChapterToast] = useState<{
+    title: string;
+    number: number;
+    total: number;
+    seq: number;
+  } | null>(null);
+  const toastChapterRef = useRef(currentChapter);
+  const toastSeqRef = useRef(0);
+  const toastTimerRef = useRef<number | null>(null);
   useEffect(() => {
+    if (toastChapterRef.current === currentChapter) return;
+    toastChapterRef.current = currentChapter;
+    toastSeqRef.current += 1;
+    setChapterToast({
+      title: chapter.title,
+      number: currentChapter + 1,
+      total: chapterCount,
+      seq: toastSeqRef.current,
+    });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    // Slightly longer than the CSS animation (1500ms) so the element
+    // unmounts after the fade-out finishes, not mid-animation.
+    toastTimerRef.current = window.setTimeout(() => {
+      setChapterToast(null);
+      toastTimerRef.current = null;
+    }, 1550);
+  }, [currentChapter, chapter.title, chapterCount]);
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  // Scroll to the live paragraph whenever the chapter changes or the
+  // mode flips back to scroll — only active in scroll mode. Paginated
+  // mode owns its own resume logic via PaginatedView's `initialParagraph`
+  // prop. Using `livePara` (not `resumeRef`) means a paginated→scroll
+  // switch lands on the same paragraph the user was just reading, not on
+  // the chapter's original entry point.
+  useEffect(() => {
+    if (mode !== "scroll") return;
     const el = scrollRef.current;
     if (!el) return;
+    if (landAtEndRef.current) {
+      // Came in via scroll-up overscroll — drop the reader at the bottom
+      // of the new (previous) chapter so reading continues naturally
+      // upward instead of jumping to the chapter's top.
+      landAtEndRef.current = false;
+      el.scrollTop = el.scrollHeight;
+      const ps = el.querySelectorAll<HTMLElement>("[data-p-index]");
+      if (ps.length > 0) {
+        let lastIdx = 0;
+        for (const p of ps) {
+          const idx = Number(p.dataset.pIndex);
+          if (idx > lastIdx) lastIdx = idx;
+        }
+        livePara.current = lastIdx;
+        // Persist so resume after a restart matches what the user sees.
+        onParagraphChangeRef.current(lastIdx);
+      }
+      return;
+    }
     const target = el.querySelector<HTMLElement>(
-      `[data-p-index="${resumeRef.current}"]`,
+      `[data-p-index="${livePara.current}"]`,
     );
     if (target) {
       el.scrollTop = target.offsetTop;
@@ -126,11 +217,13 @@ export function DesktopReader({
       el.scrollTop = 0;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentChapter, book.id]);
+  }, [currentChapter, book.id, mode]);
 
   // Throttled scroll listener — find the topmost-visible paragraph and
-  // bubble its index up to the App state for persistence.
+  // bubble its index up to the App state for persistence. Only runs in
+  // scroll mode; paginated mode reports paragraphs through PaginatedView.
   useEffect(() => {
+    if (mode !== "scroll") return;
     const el = scrollRef.current;
     if (!el) return;
     let queued = false;
@@ -153,19 +246,172 @@ export function DesktopReader({
     };
     el.addEventListener("scroll", handler, { passive: true });
     return () => el.removeEventListener("scroll", handler);
+  }, [mode]);
+
+  // Imperative handle on the paginated view so the keyboard handler and
+  // the bottom-bar arrow buttons can flip pages without rebuilding the
+  // PaginatedView's internal page state on every render.
+  const paginatedApiRef = useRef<PaginatedAPI | null>(null);
+  const onPaginatedApi = useCallback((api: PaginatedAPI) => {
+    paginatedApiRef.current = api;
   }, []);
+
+  // Ref on the paginated wrapper so the wheel listener can preventDefault
+  // (must be non-passive) without touching the scroll container.
+  const paginatedWrapRef = useRef<HTMLDivElement>(null);
+
+  // Wheel-to-flip-page in paginated modes. A short cooldown prevents a
+  // single trackpad gesture from skipping multiple pages in one swipe.
+  // At a chapter boundary (first/last page) it falls through to chapter
+  // navigation so the user can keep scrolling through the book.
+  useEffect(() => {
+    if (!isPaginated) return;
+    const el = paginatedWrapRef.current;
+    if (!el) return;
+    let cooldown = false;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 4) return; // ignore minor trackpad noise
+      e.preventDefault();
+      if (cooldown) return;
+      cooldown = true;
+      window.setTimeout(() => { cooldown = false; }, 380);
+      const api = paginatedApiRef.current;
+      if (e.deltaY > 0) {
+        // Forward — next page, or next chapter at the last page.
+        if (!api?.nextPage()) {
+          if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
+        }
+      } else {
+        // Backward — prev page, or prev chapter at the first page.
+        if (!api?.prevPage()) {
+          if (currentChapter > 0) onChapterChange(currentChapter - 1);
+        }
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPaginated, currentChapter, chapterCount, onChapterChange]);
+
+  // Overscroll state: when the reader is in scroll mode and the user
+  // keeps scrolling past the chapter's edge, a small indicator builds up
+  // at the relevant edge until a threshold flips chapters. Lets the user
+  // continue reading without reaching for the prev/next buttons.
+  const [overscroll, setOverscroll] = useState<{
+    dir: "down" | "up";
+    pct: number;
+  } | null>(null);
+  const overscrollAmtRef = useRef(0);
+  const overscrollDirRef = useRef<"down" | "up" | null>(null);
+  const overscrollResetTimer = useRef<number | null>(null);
+  const OVERSCROLL_THRESHOLD = 140; // px of accumulated wheel delta
+
+  useEffect(() => {
+    if (mode !== "scroll") return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const reset = () => {
+      overscrollAmtRef.current = 0;
+      overscrollDirRef.current = null;
+      setOverscroll(null);
+      if (overscrollResetTimer.current) {
+        clearTimeout(overscrollResetTimer.current);
+        overscrollResetTimer.current = null;
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      const goingDown = e.deltaY > 0;
+      const goingUp = e.deltaY < 0;
+      // Tolerate sub-pixel rounding when measuring the chapter edge.
+      const atBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight <= 1;
+      const atTop = el.scrollTop <= 1;
+      let dir: "down" | "up" | null = null;
+      if (atBottom && goingDown && currentChapter < chapterCount - 1) {
+        dir = "down";
+      } else if (atTop && goingUp && currentChapter > 0) {
+        dir = "up";
+      }
+      if (dir === null) {
+        if (overscrollDirRef.current !== null) reset();
+        return;
+      }
+      // Block the browser's own bounce so the wheel events stay ours
+      // until we've decided whether to flip chapters.
+      e.preventDefault();
+      if (overscrollDirRef.current !== dir) {
+        overscrollDirRef.current = dir;
+        overscrollAmtRef.current = 0;
+      }
+      overscrollAmtRef.current = Math.min(
+        OVERSCROLL_THRESHOLD * 1.05,
+        overscrollAmtRef.current + Math.abs(e.deltaY),
+      );
+      const pct = Math.min(1, overscrollAmtRef.current / OVERSCROLL_THRESHOLD);
+      setOverscroll({ dir, pct });
+
+      if (overscrollAmtRef.current >= OVERSCROLL_THRESHOLD) {
+        const triggered = dir;
+        reset();
+        if (triggered === "down") {
+          nextChapter();
+        } else {
+          // Going up: land at the bottom of the previous chapter so the
+          // reader's eye picks up where it left off, mid-flow.
+          landAtEndRef.current = true;
+          prevChapter();
+        }
+        return;
+      }
+      // No more wheel events for ~280ms? Treat as the user releasing —
+      // fade the indicator instead of leaving it stuck.
+      if (overscrollResetTimer.current)
+        clearTimeout(overscrollResetTimer.current);
+      overscrollResetTimer.current = window.setTimeout(reset, 280);
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      // Drop any in-flight indicator state — if the chapter changed via
+      // some other path (TOC, scrub, keyboard) we don't want a stale
+      // pill stuck on screen.
+      if (overscrollResetTimer.current) {
+        clearTimeout(overscrollResetTimer.current);
+        overscrollResetTimer.current = null;
+      }
+      overscrollAmtRef.current = 0;
+      overscrollDirRef.current = null;
+      setOverscroll(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, currentChapter, chapterCount]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable))
         return;
-      if (e.key === "ArrowRight") {
-        e.preventDefault();
-        nextChapter();
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        prevChapter();
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      e.preventDefault();
+      // In RTL, "forward in the book" is the LEFT arrow — the same arrow
+      // that visually points the way pages flip in a RTL-bound book.
+      const forward = rtl ? e.key === "ArrowLeft" : e.key === "ArrowRight";
+      if (isPaginated) {
+        // Paginated: arrows flip pages. At a chapter boundary, fall
+        // through to chapter navigation so the user can keep pressing
+        // the arrow to keep moving through the book.
+        const api = paginatedApiRef.current;
+        if (forward) {
+          if (!api || !api.nextPage()) nextChapter();
+        } else {
+          if (!api || !api.prevPage()) prevChapter();
+        }
+      } else {
+        if (forward) nextChapter();
+        else prevChapter();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -474,32 +720,80 @@ export function DesktopReader({
             minWidth: 0,
           }}
         >
-          <div
-            ref={scrollRef}
-            style={{
-              flex: 1,
-              overflow: "auto",
-              padding: "60px 80px 30px",
-              position: "relative",
-            }}
-            className="no-scrollbar"
-          >
-            <BookBody
-              chapter={chapter}
-              chapterCount={chapterCount}
-              theme={theme}
-              themeKey={themeKey}
-              fontFamily={t.fontFamily}
-              fontSize={t.fontSize}
-              lineHeight={t.lineHeight}
-              letterSpacing={t.letterSpacing}
-              textAlign={t.textAlign}
-              columns={t.columns}
-              rtl={t.rtl}
-              maxWidth={t.pageWidth}
-              highlights={state.highlights}
-            />
-          </div>
+          {isPaginated ? (
+            <div
+              ref={paginatedWrapRef}
+              style={{
+                flex: 1,
+                padding: "60px 80px 30px",
+                position: "relative",
+                minHeight: 0,
+                minWidth: 0,
+              }}
+            >
+              <PaginatedView
+                columnsPerPage={paginatedColumns}
+                rtl={rtl}
+                initialParagraph={livePara.current}
+                onParagraphChange={handleParagraphChange}
+                onApi={onPaginatedApi}
+              >
+                <div key={chapter.id} className="leaflet-chapter-enter">
+                  <BookBody
+                    chapter={chapter}
+                    chapterCount={chapterCount}
+                    theme={theme}
+                    themeKey={themeKey}
+                    fontFamily={t.fontFamily}
+                    fontSize={t.fontSize}
+                    lineHeight={t.lineHeight}
+                    letterSpacing={t.letterSpacing}
+                    textAlign={t.textAlign}
+                    rtl={rtl}
+                    highlights={state.highlights}
+                  />
+                </div>
+              </PaginatedView>
+            </div>
+          ) : (
+            <div
+              ref={scrollRef}
+              style={{
+                flex: 1,
+                overflow: "auto",
+                padding: "60px 80px 30px",
+                position: "relative",
+                // overscroll-behavior: contain stops the browser's own
+                // chrome bounce so our wheel preventDefault is the
+                // authority on what happens past the edge.
+                overscrollBehavior: "contain",
+              }}
+              className="no-scrollbar"
+            >
+              <div key={chapter.id} className="leaflet-chapter-enter">
+                <BookBody
+                  chapter={chapter}
+                  chapterCount={chapterCount}
+                  theme={theme}
+                  themeKey={themeKey}
+                  fontFamily={t.fontFamily}
+                  fontSize={t.fontSize}
+                  lineHeight={t.lineHeight}
+                  letterSpacing={t.letterSpacing}
+                  textAlign={t.textAlign}
+                  rtl={rtl}
+                  maxWidth={t.pageWidth}
+                  highlights={state.highlights}
+                />
+              </div>
+            </div>
+          )}
+          {overscroll && (
+            <OverscrollIndicator theme={theme} state={overscroll} />
+          )}
+          {chapterToast && (
+            <ChapterToast key={chapterToast.seq} theme={theme} info={chapterToast} />
+          )}
 
           <div
             style={{
@@ -689,6 +983,150 @@ export function DesktopReader({
           onDismiss={() => setActiveHl(null)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Centered chapter-name pop-up. Fires on each chapter swap so the reader
+ * gets a clear "you're now on Chapter X" cue without needing to look at
+ * the chrome bar. Animation timing is owned by CSS (.leaflet-chapter-toast),
+ * the host just renders + unmounts.
+ */
+function ChapterToast({
+  theme,
+  info,
+}: {
+  theme: Theme;
+  info: { title: string; number: number; total: number };
+}) {
+  return (
+    <div
+      className="leaflet-chapter-toast"
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        // Initial transform is overridden by the keyframes; setting it
+        // here keeps SSR / pre-animation paint centered too.
+        transform: "translate(-50%, -50%)",
+        pointerEvents: "none",
+        zIndex: 50,
+        padding: "16px 28px",
+        borderRadius: 14,
+        background: theme.chrome,
+        color: theme.ink,
+        border: `0.5px solid ${theme.rule}`,
+        boxShadow: "0 16px 44px rgba(0,0,0,0.22)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        fontFamily: FONT_STACKS.sans,
+        textAlign: "center",
+        minWidth: 220,
+        maxWidth: 360,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.14em",
+          textTransform: "uppercase",
+          color: theme.muted,
+          marginBottom: 6,
+        }}
+      >
+        Chapter {info.number} of {info.total}
+      </div>
+      <div
+        style={{
+          fontFamily: titleFontFor(info.title),
+          fontSize: 18,
+          fontStyle: isArabicTitle(info.title) ? "normal" : "italic",
+          fontWeight: 500,
+          letterSpacing: "-0.01em",
+          lineHeight: 1.3,
+          color: theme.ink,
+          // Truncate very long titles to two lines so the toast doesn't
+          // turn into a full-screen takeover for chapters with long
+          // editorial subheads.
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
+      >
+        {info.title}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Subtle pill that fades in at the chapter edge when the reader keeps
+ * scrolling past the end (or top). Fills as accumulated overscroll
+ * approaches the chapter-flip threshold.
+ */
+function OverscrollIndicator({
+  theme,
+  state,
+}: {
+  theme: Theme;
+  state: { dir: "down" | "up"; pct: number };
+}) {
+  const isDown = state.dir === "down";
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: "50%",
+        transform: "translateX(-50%)",
+        [isDown ? "bottom" : "top"]: 60,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 14px",
+        borderRadius: 999,
+        background: theme.chrome,
+        color: theme.muted,
+        border: `0.5px solid ${theme.rule}`,
+        fontSize: 11,
+        fontFamily: FONT_STACKS.sans,
+        pointerEvents: "none",
+        opacity: 0.4 + state.pct * 0.6,
+        boxShadow: `0 6px 18px ${theme.rule}`,
+        zIndex: 30,
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          transform: isDown ? "none" : "rotate(180deg)",
+        }}
+      >
+        <Icon name="chevronD" size={12} />
+      </span>
+      <span>
+        {isDown ? "Keep scrolling for next chapter" : "Keep scrolling for previous chapter"}
+      </span>
+      <div
+        style={{
+          width: 50,
+          height: 2,
+          background: theme.rule,
+          borderRadius: 1,
+        }}
+      >
+        <div
+          style={{
+            width: `${state.pct * 100}%`,
+            height: "100%",
+            background: theme.ink,
+            borderRadius: 1,
+            transition: "width 80ms linear",
+          }}
+        />
+      </div>
     </div>
   );
 }

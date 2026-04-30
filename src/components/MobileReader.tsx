@@ -9,6 +9,7 @@ import type { EpubBook } from "../epub/types";
 import type { BookState, Highlight } from "../store/library";
 import {
   FONT_STACKS,
+  isRtlLanguage,
   type HighlightColor,
   type Theme,
   type ThemeKey,
@@ -331,11 +332,10 @@ export function MobileReader({
           lineHeight={t.lineHeight}
           letterSpacing={t.letterSpacing}
           textAlign={t.textAlign}
-          // Mobile ignores the columns/pageWidth tweaks — the screen is
-          // narrow enough that two columns or >360px page width would just
-          // overflow. Those tweaks drive the desktop reader only.
-          columns={1}
-          rtl={t.rtl}
+          // Mobile ignores the desktop-only layout tweaks (reading mode,
+          // page width) — the screen is narrow enough that paginated columns
+          // or >360px page width would just overflow.
+          rtl={isRtlLanguage(book.language)}
           maxWidth={360}
         />
       </div>

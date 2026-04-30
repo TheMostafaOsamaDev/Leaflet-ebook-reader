@@ -19,8 +19,13 @@ interface Props {
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
-  textAlign: "left" | "justify" | "right";
-  columns: 1 | 2;
+  /** "auto" lets BookBody pick a sensible default from the script
+      direction — justify for LTR, right for RTL. The user's explicit
+      choices ("left" / "justify" / "right") always win. */
+  textAlign: "auto" | "left" | "justify" | "right";
+  /** Whether to render the chapter as RTL — derived from the book's
+      language tag by the caller. Drives `dir`, alignment fallback, and
+      title font choice. */
   rtl: boolean;
   maxWidth?: number;
   /** Highlights that anchor into this chapter. BookBody renders any
@@ -38,11 +43,16 @@ export function BookBody({
   lineHeight,
   letterSpacing,
   textAlign,
-  columns,
   rtl,
   maxWidth = 680,
   highlights = [],
 }: Props) {
+  const resolvedAlign =
+    textAlign === "auto" ? (rtl ? "right" : "justify") : textAlign;
+  // BookBody renders a flat linear flow. Multi-column layout (paginated or
+  // otherwise) is now the wrapper's job — that lets DesktopReader switch
+  // between scroll and paginated modes by changing only the container,
+  // without BookBody having to know which one it's inside.
   const common: CSSProperties = {
     fontSize,
     lineHeight,
@@ -50,9 +60,6 @@ export function BookBody({
     color: theme.ink,
     maxWidth,
     margin: "0 auto",
-    columnCount: columns,
-    columnGap: 56,
-    columnRule: columns > 1 ? `0.5px solid ${theme.rule}` : "none",
   };
 
   // Honour the user's font choice in both LTR and RTL. Each FONT_STACKS
@@ -88,7 +95,7 @@ export function BookBody({
       style={{
         ...common,
         fontFamily: bodyFont,
-        textAlign: rtl ? "right" : textAlign,
+        textAlign: resolvedAlign,
       }}
     >
       <div style={{ marginBottom: "1.4em", breakInside: "avoid-column" }}>
