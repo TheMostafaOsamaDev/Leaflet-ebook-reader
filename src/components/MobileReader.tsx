@@ -93,6 +93,13 @@ export function MobileReader({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    // Resuming at paragraph 0 means "start of chapter" — snap to the very
+    // top so the chapter heading BookBody renders above paragraph 0 stays
+    // visible. Using offsetTop of p0 would scroll the heading off-screen.
+    if (resumeRef.current === 0) {
+      el.scrollTop = 0;
+      return;
+    }
     const target = el.querySelector<HTMLElement>(
       `[data-p-index="${resumeRef.current}"]`,
     );
