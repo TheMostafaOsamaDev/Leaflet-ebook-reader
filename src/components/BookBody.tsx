@@ -103,7 +103,11 @@ export function BookBody({
     letterSpacing: `${letterSpacing}em`,
     color: theme.ink,
     width: `${clampedPercent}%`,
-    maxWidth,
+    // Cap with the px `maxWidth` only when the user has scaled the column
+    // down. At 100% the user is asking for "use the whole container minus
+    // the reader's padding" — the px cap would silently override that and
+    // leave a gutter on wide screens, which was the original bug.
+    maxWidth: clampedPercent >= 100 ? undefined : maxWidth,
     margin: "0 auto",
   };
 
