@@ -228,7 +228,10 @@ export function Library({ theme, layout, onOpen }: Props) {
   const closeContextMenu = () => setMenu(null);
   const onPickStatus = async (bookId: string, s: BookStatus) => {
     try {
-      await updateBookStatus(bookId, s);
+      // Re-clicking the currently-set status clears it — acts as a toggle so
+      // the user doesn't have to reach for a separate "Clear status" item.
+      const current = books.find((b) => b.id === bookId)?.status;
+      await updateBookStatus(bookId, current === s ? undefined : s);
       await refresh();
       closeContextMenu();
     } catch (e) {
@@ -380,6 +383,31 @@ interface LayoutProps {
   onCardContextMenu: (id: string, x: number, y: number) => void;
 }
 
+type LibraryTab = "all" | BookStatus;
+
+const TABS: { key: LibraryTab; label: string }[] = [
+  { key: "all", label: "Library" },
+  { key: "reading", label: "Reading" },
+  { key: "finished", label: "Finished" },
+  { key: "wishlist", label: "Wishlist" },
+];
+
+// "Reading" is partly derived: a book the user has actually started but not
+// finished counts as in-progress even if they never explicitly tagged it.
+// Explicit finished/wishlist still wins — those are user intent and override
+// whatever the progress number says.
+function isReading(b: BookIndexEntry): boolean {
+  if (b.status === "reading") return true;
+  if (b.status === "finished" || b.status === "wishlist") return false;
+  return b.progress > 0 && b.progress < 1;
+}
+
+function matchesTab(b: BookIndexEntry, tab: LibraryTab): boolean {
+  if (tab === "all") return true;
+  if (tab === "reading") return isReading(b);
+  return b.status === tab;
+}
+
 function DesktopLibrary({
   theme,
   books,
@@ -396,12 +424,16 @@ function DesktopLibrary({
   onEdit,
   onCardContextMenu,
 }: LayoutProps) {
-  // Hero is the actually-last-read book, not the one most-recently-added.
-  // `listBooks()` already sorts read books above unread by lastReadAt, so
-  // the first entry with lastReadAt defined is the right pick. If no book
-  // has been opened yet, there's no hero — everything lands on the shelf.
-  const hero = books.find((b) => b.lastReadAt !== undefined);
-  const others = hero ? books.filter((b) => b.id !== hero.id) : books;
+  const [tab, setTab] = useState<LibraryTab>("all");
+  const visible = books.filter((b) => matchesTab(b, tab));
+  // Hero is the "continue reading" affordance — only meaningful on the full
+  // library view. On a filtered tab we render a flat shelf so every match is
+  // equally weighted.
+  const hero =
+    tab === "all"
+      ? visible.find((b) => b.lastReadAt !== undefined)
+      : undefined;
+  const others = hero ? visible.filter((b) => b.id !== hero.id) : visible;
 
   return (
     <div
@@ -437,23 +469,27 @@ function DesktopLibrary({
           Leaflet
         </div>
         <div style={{ display: "flex", gap: 4, marginLeft: 12 }}>
-          {["Library", "Reading", "Finished", "Wishlist"].map((l, i) => (
-            <button
-              key={l}
-              style={{
-                border: "none",
-                background: i === 0 ? theme.hover : "transparent",
-                color: i === 0 ? theme.ink : theme.muted,
-                padding: "6px 12px",
-                borderRadius: 7,
-                fontSize: 12.5,
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              {l}
-            </button>
-          ))}
+          {TABS.map(({ key, label }) => {
+            const active = key === tab;
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                style={{
+                  border: "none",
+                  background: active ? theme.hover : "transparent",
+                  color: active ? theme.ink : theme.muted,
+                  padding: "6px 12px",
+                  borderRadius: 7,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
         <div style={{ flex: 1 }} />
         {import.meta.env.DEV && (
@@ -514,6 +550,8 @@ function DesktopLibrary({
           </div>
         ) : books.length === 0 ? (
           <EmptyState theme={theme} onImport={onImport} importing={importing} />
+        ) : visible.length === 0 ? (
+          <FilteredEmptyState theme={theme} tab={tab} />
         ) : (
           <>
             {hero && (
@@ -546,7 +584,7 @@ function DesktopLibrary({
                     letterSpacing: "-0.01em",
                   }}
                 >
-                  Your shelf
+                  {tab === "all" ? "Your shelf" : shelfHeadingFor(tab)}
                 </h2>
                 <div
                   style={{ fontSize: 12, color: theme.muted, marginTop: 2 }}
@@ -1243,6 +1281,49 @@ function EmptyState({
       >
         {importing ? "Importing…" : "Import your first EPUB"}
       </Button>
+    </div>
+  );
+}
+
+function shelfHeadingFor(tab: BookStatus): string {
+  return tab === "reading"
+    ? "Currently reading"
+    : tab === "finished"
+    ? "Finished"
+    : "Wishlist";
+}
+
+function FilteredEmptyState({
+  theme,
+  tab,
+}: {
+  theme: Theme;
+  tab: LibraryTab;
+}) {
+  const message =
+    tab === "reading"
+      ? "No books marked as reading yet."
+      : tab === "finished"
+      ? "No finished books yet."
+      : tab === "wishlist"
+      ? "Nothing on your wishlist yet."
+      : "Nothing here.";
+  return (
+    <div
+      style={{
+        margin: "64px auto",
+        maxWidth: 380,
+        padding: 24,
+        textAlign: "center",
+        color: theme.muted,
+        fontSize: 13,
+        lineHeight: 1.55,
+      }}
+    >
+      {message}
+      <div style={{ marginTop: 8, fontSize: 12 }}>
+        Right-click a book to set its status.
+      </div>
     </div>
   );
 }
