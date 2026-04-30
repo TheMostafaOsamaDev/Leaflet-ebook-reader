@@ -333,7 +333,12 @@ export function MobileReader({
         style={{
           flex: 1,
           overflow: "auto",
-          padding: showChrome ? "88px 28px 140px" : "44px 28px 44px",
+          // Padding stays constant whether chrome is shown or hidden —
+          // the chrome bars are absolutely positioned and act as a
+          // translucent overlay (iOS Books / Kindle style). Swapping
+          // padding on toggle was reflowing the visible lines and
+          // moving the user's reading position.
+          padding: "44px 28px 44px",
           position: "relative",
         }}
         className="no-scrollbar"
