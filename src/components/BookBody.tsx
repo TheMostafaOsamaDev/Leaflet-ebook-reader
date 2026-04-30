@@ -1,6 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
-import type { EpubChapter } from "../epub/types";
-import type { Highlight } from "../store/library";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { isImageItem, type ChapterItem, type EpubChapter } from "../epub/types";
+import { chapterImageSrcFor, type Highlight } from "../store/library";
 import {
   FONT_SERIF_DISPLAY,
   FONT_STACKS,
@@ -11,6 +11,8 @@ import {
 } from "../styles/tokens";
 
 interface Props {
+  /** Book id — needed to resolve image item `src` to an asset:// URL. */
+  bookId: string;
   chapter: EpubChapter;
   chapterCount: number;
   theme: Theme;
@@ -33,7 +35,43 @@ interface Props {
   highlights?: Highlight[];
 }
 
+/** Resolve every image item's storage-relative src to a webview-loadable
+ *  asset URL once per chapter switch. Brief flash on first render of each
+ *  chapter while these promises settle is acceptable — once resolved the
+ *  Map is stable and the same image rendered twice picks up the same URL. */
+function useChapterImageUrls(
+  bookId: string,
+  paragraphs: ChapterItem[],
+): Map<string, string> {
+  const [urls, setUrls] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    const srcs = Array.from(
+      new Set(paragraphs.filter(isImageItem).map((p) => p.src)),
+    );
+    if (srcs.length === 0) {
+      setUrls(new Map());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        srcs.map(
+          async (src) =>
+            [src, await chapterImageSrcFor(bookId, src)] as const,
+        ),
+      );
+      if (cancelled) return;
+      setUrls(new Map(entries));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId, paragraphs]);
+  return urls;
+}
+
 export function BookBody({
+  bookId,
   chapter,
   chapterCount,
   theme,
@@ -68,16 +106,23 @@ export function BookBody({
   // old `FONT_ARABIC` force-override is no longer needed and was silently
   // ignoring the user's selection in RTL mode.
   const bodyFont = FONT_STACKS[fontFamily];
+
+  const imageUrls = useChapterImageUrls(bookId, chapter.paragraphs);
+
   // Drop the first paragraph if it's just the chapter title repeated — many
   // EPUBs include an <h1>/<h2> with the title as the first block element.
   // We track each kept paragraph's *original* index so highlights anchored
   // to chapter.paragraphs[i] resolve to the same paragraph after filtering.
+  // Image items at index 0 always pass through — those are figures, not
+  // duplicate titles.
   const normalizedTitle = chapter.title.trim().toLowerCase();
   const paragraphs = chapter.paragraphs
     .map((p, originalIndex) => ({ p, originalIndex }))
-    .filter(({ p, originalIndex }) =>
-      originalIndex !== 0 || p.text.trim().toLowerCase() !== normalizedTitle,
-    );
+    .filter(({ p, originalIndex }) => {
+      if (originalIndex !== 0) return true;
+      if (isImageItem(p)) return true;
+      return p.text.trim().toLowerCase() !== normalizedTitle;
+    });
 
   // Bucket the chapter's highlights by paragraph index once so each
   // paragraph render is O(matches) instead of O(highlights).
@@ -130,19 +175,45 @@ export function BookBody({
           {chapter.title}
         </h2>
       </div>
-      {paragraphs.map(({ p, originalIndex }) => (
-        <p
-          key={originalIndex}
-          data-p-index={originalIndex}
-          style={{ margin: "0 0 1.1em" }}
-        >
-          {renderParagraph(
-            p.text,
-            highlightsByParagraph.get(originalIndex) ?? [],
-            themeKey,
-          )}
-        </p>
-      ))}
+      {paragraphs.map(({ p, originalIndex }) =>
+        isImageItem(p) ? (
+          <figure
+            key={originalIndex}
+            data-p-index={originalIndex}
+            style={{
+              margin: "1.4em 0",
+              textAlign: "center",
+            }}
+          >
+            <img
+              src={imageUrls.get(p.src)}
+              alt={p.alt ?? ""}
+              loading="lazy"
+              style={{
+                maxWidth: "100%",
+                height: "auto",
+                // The image dimensions come from the file itself. We render a
+                // subtle placeholder background while loading + a corner
+                // radius so unstyled photos look intentional in-flow.
+                borderRadius: 6,
+                background: theme.chrome,
+              }}
+            />
+          </figure>
+        ) : (
+          <p
+            key={originalIndex}
+            data-p-index={originalIndex}
+            style={{ margin: "0 0 1.1em" }}
+          >
+            {renderParagraph(
+              p.text,
+              highlightsByParagraph.get(originalIndex) ?? [],
+              themeKey,
+            )}
+          </p>
+        ),
+      )}
     </div>
   );
 }

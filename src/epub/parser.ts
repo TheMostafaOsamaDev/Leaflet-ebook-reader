@@ -1,8 +1,11 @@
 import JSZip from "jszip";
 import type {
+  ChapterItem,
   EpubBook,
   EpubChapter,
   EpubCover,
+  EpubImage,
+  ImageItem,
   ParsedEpub,
 } from "./types";
 
@@ -13,9 +16,13 @@ import type {
 //   2. OPF                     →  metadata + manifest (id→href) + spine (order)
 //   3. nav.xhtml or NCX        →  human-readable chapter titles (optional)
 //   4. Each spine item         →  fetch XHTML, pull paragraph-level text
+//                                  + collect <img> references, reading bytes
+//                                  out of the zip and renaming hrefs onto a
+//                                  stable `images/img-NNN.ext` scheme.
 //
-// We keep rendering simple: extract block-level text nodes into
-// `paragraph: { text }[]`, which matches the shape `BookBody` already consumes.
+// Block-level items become `ChapterItem`s — text or image. The image bytes
+// are returned in `ParsedEpub.images` so the caller (importEpubBytes) can
+// drop them on disk under `books/<id>/images/...`.
 
 const DC_NS = "http://purl.org/dc/elements/1.1/";
 const OPF_NS = "http://www.idpf.org/2007/opf";
@@ -48,6 +55,7 @@ export async function parseEpub(bytes: ArrayBuffer): Promise<ParsedEpub> {
   const navTitles = await readNavTitles(zip, basePath, opf, manifest);
   const cover = await readCover(zip, basePath, opf, manifest);
 
+  const imageCollector = new ImageCollector();
   const chapters: EpubChapter[] = [];
   let order = 0;
   for (const idref of spineIds) {
@@ -70,16 +78,22 @@ export async function parseEpub(bytes: ArrayBuffer): Promise<ParsedEpub> {
       firstHeadingText(root) ??
       `Chapter ${order + 1}`;
 
-    const paragraphs = extractParagraphs(root);
-    // Skip spine items with no readable text (covers, title pages with only
-    // images, nav docs when they're in the spine).
-    if (paragraphs.length === 0) continue;
+    const instructions = collectChapterInstructions(root);
+    const items = await resolveChapterItems(
+      instructions,
+      zip,
+      dirname(fullPath),
+      imageCollector,
+    );
+    // Skip spine items that produced nothing — usually covers, title pages
+    // whose image we already counted, or nav docs that snuck into the spine.
+    if (items.length === 0) continue;
 
     chapters.push({
       id: idref,
       href: manifestItem.href,
       title,
-      paragraphs,
+      paragraphs: items,
       order: order++,
     });
   }
@@ -94,7 +108,11 @@ export async function parseEpub(bytes: ArrayBuffer): Promise<ParsedEpub> {
     language,
     chapters,
   };
-  return cover ? { book, cover } : { book };
+  return {
+    book,
+    images: imageCollector.collected(),
+    ...(cover ? { cover } : {}),
+  };
 }
 
 // ── internals ──────────────────────────────────────────────────────────────
@@ -459,26 +477,144 @@ function parseNcx(
 
 const BLOCK_SELECTOR =
   "p, blockquote, h1, h2, h3, h4, h5, h6, li, figcaption, div.para";
+const ITEM_SELECTOR = `${BLOCK_SELECTOR}, img`;
 
-function extractParagraphs(doc: Document): { text: string }[] {
+/** What `collectChapterInstructions` emits — a flat document-order list of
+ *  text spans + image references. The image step is deferred so the
+ *  zip-read can run async without scattering awaits inside the DOM walk. */
+type ChapterInstruction =
+  | { kind: "text"; text: string }
+  | { kind: "image"; src: string; alt?: string };
+
+function collectChapterInstructions(doc: Document): ChapterInstruction[] {
   const body = doc.body ?? doc.documentElement;
   if (!body) return [];
-  const nodes = body.querySelectorAll(BLOCK_SELECTOR);
+  const nodes = body.querySelectorAll(ITEM_SELECTOR);
   const seen = new Set<Element>();
-  const out: { text: string }[] = [];
+  const out: ChapterInstruction[] = [];
+
   nodes.forEach((node) => {
-    // Skip nested blocks — keep only the outermost one to avoid duplicates.
+    const isImg = node.tagName.toLowerCase() === "img";
+
+    // Skip elements nested inside another matching block. Exception: a bare
+    // `<p><img/></p>` wrapper passes the img through, since EPUB content
+    // routinely wraps images in single-purpose paragraphs.
     let anc = node.parentElement;
     while (anc && anc !== body) {
-      if (anc.matches(BLOCK_SELECTOR)) return;
+      if (anc.matches(BLOCK_SELECTOR)) {
+        const ancText = (anc.textContent ?? "").replace(/\s+/g, " ").trim();
+        if (!isImg || ancText.length > 0) return;
+      }
       anc = anc.parentElement;
     }
     if (seen.has(node)) return;
     seen.add(node);
+
+    if (isImg) {
+      const src = node.getAttribute("src");
+      if (!src) return;
+      const alt = node.getAttribute("alt") || undefined;
+      out.push({ kind: "image", src, alt });
+      return;
+    }
+
+    // Block element. If its only meaningful content is an inner <img> with
+    // no surrounding text, emit that image directly so we don't drop it on
+    // the (text.length > 0) check below.
     const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
-    if (text.length > 0) out.push({ text });
+    if (text.length === 0) {
+      const innerImg = node.querySelector("img");
+      if (innerImg) {
+        const src = innerImg.getAttribute("src");
+        if (src) {
+          seen.add(innerImg);
+          out.push({
+            kind: "image",
+            src,
+            alt: innerImg.getAttribute("alt") || undefined,
+          });
+        }
+      }
+      return;
+    }
+    out.push({ kind: "text", text });
   });
+
   return out;
+}
+
+/** Take the document-order instructions and turn them into ChapterItems,
+ *  deferring image-byte reads through the shared collector so the same
+ *  source path used by multiple chapters only gets stored once. */
+async function resolveChapterItems(
+  instructions: ChapterInstruction[],
+  zip: JSZip,
+  chapterDir: string,
+  collector: ImageCollector,
+): Promise<ChapterItem[]> {
+  const out: ChapterItem[] = [];
+  for (const inst of instructions) {
+    if (inst.kind === "text") {
+      out.push({ text: inst.text });
+      continue;
+    }
+    const zipPath = joinPath(chapterDir, decodeURI(inst.src.split("#")[0]));
+    const href = await collector.addImageFromZip(zip, zipPath);
+    if (!href) continue; // referenced image missing from zip — drop silently
+    const item: ImageItem = { src: href };
+    if (inst.alt) item.alt = inst.alt;
+    out.push(item);
+  }
+  return out;
+}
+
+/** Reads referenced images out of the zip on first encounter, dedupes by
+ *  source path, and assigns each a stable `images/img-NNN.ext` href. The
+ *  href shape doubles as the on-disk path under `books/<id>/`, so the
+ *  reader can resolve it via Tauri's asset:// protocol later. */
+class ImageCollector {
+  private byPath = new Map<string, string>();
+  private images: EpubImage[] = [];
+
+  async addImageFromZip(
+    zip: JSZip,
+    zipPath: string,
+  ): Promise<string | null> {
+    const cached = this.byPath.get(zipPath);
+    if (cached) return cached;
+
+    const file = zip.file(zipPath);
+    if (!file) return null;
+
+    let bytes: Uint8Array;
+    try {
+      bytes = await file.async("uint8array");
+    } catch {
+      return null;
+    }
+
+    const ext = imageExtensionForPath(zipPath);
+    const idx = this.images.length + 1;
+    const href = `images/img-${String(idx).padStart(3, "0")}.${ext}`;
+    const mimeType = mimeForExtension(ext);
+
+    this.byPath.set(zipPath, href);
+    this.images.push({ href, bytes, mimeType });
+    return href;
+  }
+
+  collected(): EpubImage[] {
+    return this.images;
+  }
+}
+
+function imageExtensionForPath(zipPath: string): string {
+  const m = zipPath.match(/\.([A-Za-z0-9]{2,5})(?:$|[?#])/);
+  const raw = m?.[1]?.toLowerCase();
+  if (!raw) return "bin";
+  // Normalize a couple of common aliases so the on-disk filename is tidy.
+  if (raw === "jpeg") return "jpg";
+  return raw;
 }
 
 function firstHeadingText(doc: Document): string | null {

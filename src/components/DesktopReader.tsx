@@ -740,6 +740,7 @@ export function DesktopReader({
               >
                 <div key={chapter.id} className="leaflet-chapter-enter">
                   <BookBody
+                    bookId={book.id}
                     chapter={chapter}
                     chapterCount={chapterCount}
                     theme={theme}
@@ -772,6 +773,7 @@ export function DesktopReader({
             >
               <div key={chapter.id} className="leaflet-chapter-enter">
                 <BookBody
+                  bookId={book.id}
                   chapter={chapter}
                   chapterCount={chapterCount}
                   theme={theme}

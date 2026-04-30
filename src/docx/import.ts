@@ -5,7 +5,8 @@
 //
 //   read      — read the file off disk
 //   lang      — pull language + RTL/LTR out of the docx package
-//   convert   — mammoth: docx → HTML; capture the first embedded image as cover
+//   convert   — mammoth: docx → HTML; first image becomes cover, the rest
+//                are extracted as separate files referenced by relative href
 //   chapters  — split the HTML into chapter docs by detected heading level
 //   epub      — assemble the EPUB3 zip
 //   save      — hand off to the existing importEpubBytes() pipeline
@@ -17,7 +18,11 @@
 import JSZip from "jszip";
 import { detectDocDirection, type Dir } from "./detectDirection";
 import { splitHtmlIntoChapters, type DocChapter } from "./splitChapters";
-import { buildEpub, type EpubCoverInput } from "./buildEpub";
+import {
+  buildEpub,
+  type EpubBuildImage,
+  type EpubCoverInput,
+} from "./buildEpub";
 
 // Mammoth's browser bundle is ~700KB — lazy-load it so it doesn't ship on
 // app start. The first .docx import pays the load cost (one HTTP-cached
@@ -67,9 +72,10 @@ export async function docxToEpubBytes(
   const zip = await JSZip.loadAsync(arrayBuffer);
   const { lang, dir } = await detectDocDirection(zip);
 
-  // Mammoth conversion + first-image-as-cover capture.
+  // Mammoth conversion + image extraction (first image → cover, rest →
+  // separate files).
   await hooks.convert?.();
-  const { html, cover } = await convertDocxToHtml(arrayBuffer);
+  const { html, cover, images } = await convertDocxToHtml(arrayBuffer);
 
   // Chapter detection.
   await hooks.chapters?.();
@@ -87,6 +93,7 @@ export async function docxToEpubBytes(
     },
     chapters,
     cover,
+    images,
   );
 
   return { epubBytes, lang, dir, chapterCount: chapters.length };
@@ -94,11 +101,18 @@ export async function docxToEpubBytes(
 
 // ── internals ─────────────────────────────────────────────────────────────
 
+interface ConvertResult {
+  html: string;
+  cover: EpubCoverInput | null;
+  images: EpubBuildImage[];
+}
+
 async function convertDocxToHtml(
   arrayBuffer: ArrayBuffer,
-): Promise<{ html: string; cover: EpubCoverInput | null }> {
+): Promise<ConvertResult> {
   const mammoth = await loadMammoth();
   let cover: EpubCoverInput | null = null;
+  const images: EpubBuildImage[] = [];
 
   const result = await mammoth.convertToHtml(
     { arrayBuffer },
@@ -109,25 +123,32 @@ async function convertDocxToHtml(
         const ext = extensionFromMime(image.contentType);
 
         if (cover === null) {
-          // First image becomes the cover. We replace its `<img>` with an
-          // empty src so a regex pass below can strip it from the HTML
-          // entirely — no broken-image render in the chapter body.
+          // First image becomes the cover. We return src="" so a regex pass
+          // below strips this <img> from the chapter body — no broken-image
+          // render and no duplicate of the cover in chapter content.
           cover = { bytes, mimeType: image.contentType, extension: ext };
           return { src: "", alt: "" };
         }
 
-        // Subsequent images embed inline as data: URIs. Browsers + EPUB3
-        // readers both render these natively; trades disk size for
-        // simpler EPUB packaging.
-        const base64 = bytesToBase64(bytes);
-        return { src: `data:${image.contentType};base64,${base64}` };
+        // Each subsequent image gets a stable href relative to the chapter
+        // file. The same path layout the EPUB parser expects for image
+        // items (`images/img-NNN.ext`), so the parse-back roundtrip is a
+        // straight read of the same bytes off disk.
+        const idx = images.length + 1;
+        const href = `images/img-${String(idx).padStart(3, "0")}.${ext}`;
+        images.push({
+          href,
+          bytes,
+          mimeType: image.contentType,
+        });
+        return { src: href };
       }),
     },
   );
 
   // Strip the empty <img> we left where the cover used to be.
   const cleaned = result.value.replace(/<img\b[^>]*src=""[^>]*\/?>/gi, "");
-  return { html: cleaned, cover };
+  return { html: cleaned, cover, images };
 }
 
 function deriveTitle(chapters: DocChapter[], fallback: string): string {
@@ -159,15 +180,4 @@ function extensionFromMime(mime: string): string {
     default:
       return "bin";
   }
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  // String.fromCharCode(...big_array) blows the stack — feed it in chunks
-  // so an N-megabyte image doesn't crash the conversion.
-  let s = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(s);
 }

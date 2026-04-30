@@ -11,6 +11,7 @@
 //   OEBPS/nav.xhtml                (EPUB3 nav doc)
 //   OEBPS/style.css                (minimal stylesheet)
 //   OEBPS/cover.<ext>              (cover image, if provided)
+//   OEBPS/images/img-NNN.<ext>     (in-flow images extracted from the docx)
 //   OEBPS/chapter-N.xhtml          (one per chapter)
 
 import JSZip from "jszip";
@@ -32,10 +33,22 @@ export interface EpubCoverInput {
   extension: string;
 }
 
+/** An in-flow image extracted from the docx. The chapter HTML refers to
+ *  this by `href` (relative to the chapter file); we mirror the file at
+ *  `OEBPS/<href>` and add a manifest entry so the EPUB validates. */
+export interface EpubBuildImage {
+  /** Path relative to OEBPS, e.g. `images/img-001.png`. Matches what
+   *  appears in `<img src="...">` inside chapter HTML. */
+  href: string;
+  bytes: Uint8Array;
+  mimeType: string;
+}
+
 export async function buildEpub(
   meta: EpubMeta,
   chapters: DocChapter[],
   cover: EpubCoverInput | null,
+  images: EpubBuildImage[] = [],
 ): Promise<Uint8Array> {
   const zip = new JSZip();
 
@@ -68,7 +81,14 @@ export async function buildEpub(
     oebps.file(`cover.${cover.extension}`, cover.bytes);
   }
 
-  oebps.file("content.opf", opfXml(meta, chapterEntries, cover));
+  // Drop each in-flow image at OEBPS/<href>. Chapters reference them by
+  // the same relative path, so resolution from chapter file to image file
+  // is straightforward.
+  for (const img of images) {
+    oebps.file(img.href, img.bytes);
+  }
+
+  oebps.file("content.opf", opfXml(meta, chapterEntries, cover, images));
 
   const out = await zip.generateAsync({
     type: "uint8array",
@@ -94,6 +114,7 @@ function opfXml(
   meta: EpubMeta,
   chapters: { id: string; href: string; title: string }[],
   cover: EpubCoverInput | null,
+  images: EpubBuildImage[],
 ): string {
   const uuid = (typeof crypto !== "undefined" && "randomUUID" in crypto)
     ? crypto.randomUUID()
@@ -107,6 +128,16 @@ function opfXml(
   if (cover) {
     manifestItems.push(
       `    <item id="cover-image" href="cover.${escapeXml(cover.extension)}" media-type="${escapeXml(cover.mimeType)}" properties="cover-image"/>`,
+    );
+  }
+  // Manifest entries for each in-flow image. EPUB3 requires every file
+  // referenced by chapter content to be in the manifest, otherwise strict
+  // readers refuse to load it.
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const id = `img-${String(i + 1).padStart(3, "0")}`;
+    manifestItems.push(
+      `    <item id="${escapeXml(id)}" href="${escapeXml(img.href)}" media-type="${escapeXml(img.mimeType)}"/>`,
     );
   }
   for (const ch of chapters) {

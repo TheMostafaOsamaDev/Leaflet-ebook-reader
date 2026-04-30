@@ -322,6 +322,7 @@ export function MobileReader({
         className="no-scrollbar"
       >
         <BookBody
+          bookId={book.id}
           chapter={chapter}
           chapterCount={chapterCount}
           theme={theme}

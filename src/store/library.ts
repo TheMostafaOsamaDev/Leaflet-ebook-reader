@@ -319,7 +319,7 @@ export async function importEpubBytes(
   bytes: Uint8Array,
 ): Promise<BookIndexEntry> {
   await ensureRoot();
-  const { book, cover } = await parseEpub(bytes.buffer as ArrayBuffer);
+  const { book, cover, images } = await parseEpub(bytes.buffer as ArrayBuffer);
 
   const dir = bookDir(book.id);
   await mkdir(dir, { baseDir: BASE, recursive: true });
@@ -336,6 +336,16 @@ export async function importEpubBytes(
     paragraphIndex: 0,
     highlights: [],
   });
+
+  // Drop in-flow images on disk under books/<id>/<href> so chapter image
+  // items resolve to a real file. Each href is `images/img-NNN.ext`, so
+  // the first hit also creates the images/ subdirectory.
+  if (images.length > 0) {
+    await mkdir(`${dir}/images`, { baseDir: BASE, recursive: true });
+    for (const img of images) {
+      await writeFile(`${dir}/${img.href}`, img.bytes, { baseDir: BASE });
+    }
+  }
 
   let coverFile: string | undefined;
   if (cover) {
@@ -513,6 +523,21 @@ export async function coverSrcFor(
   // rescanCover / setCoverFromFile), else on addedAt.
   const v = entry.coverBust ?? entry.addedAt;
   return `${convertFileSrc(abs)}?v=${v}`;
+}
+
+/** Resolve a chapter image's storage-relative `src` (e.g. `images/img-001.jpg`)
+ *  into an asset-protocol URL the webview can load. The file lives at
+ *  `$APPDATA/leaflet/books/<bookId>/<src>`, which is in the Tauri asset scope. */
+export async function chapterImageSrcFor(
+  bookId: string,
+  src: string,
+): Promise<string> {
+  const root = await getAppDataDir();
+  // Split on `/` so the path joins are platform-correct (Windows backslashes
+  // come from `join`, not from the stored hrefs).
+  const parts = src.split("/").filter((p) => p.length > 0);
+  const abs = await join(root, ROOT, "books", bookId, ...parts);
+  return convertFileSrc(abs);
 }
 
 /**
