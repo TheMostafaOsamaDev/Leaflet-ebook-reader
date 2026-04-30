@@ -770,6 +770,13 @@ function MobileLibrary({
         flexDirection: "column",
         overflow: "hidden",
         fontFamily: FONT_STACKS.sans,
+        // Android status bar / iOS notch: enableEdgeToEdge() lays the
+        // WebView under the system bars, so without these insets the
+        // Library title collides with the clock and signal icons.
+        paddingTop: "env(safe-area-inset-top, 0px)",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
       }}
     >
       <div
