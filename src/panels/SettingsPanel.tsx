@@ -16,6 +16,9 @@ interface Props {
   t: Tweaks;
   setTweak: <K extends keyof Tweaks>(key: K, value: Tweaks[K]) => void;
   onClose?: () => void;
+  /** Surface mobile-only fields (e.g. tap-to-turn-pages). The desktop
+      reader doesn't show these because they have no effect there. */
+  mobile?: boolean;
 }
 
 const THEME_SWATCHES: ReadonlyArray<[ThemeKey, string, string]> = [
@@ -139,6 +142,7 @@ export function SettingsPanel({
   t,
   setTweak,
   onClose,
+  mobile,
 }: Props) {
   return (
     <PanelShell
@@ -342,6 +346,20 @@ export function SettingsPanel({
             value={t.pageWidth}
             onChange={(e) => setTweak("pageWidth", +e.target.value)}
             style={{ width: "100%", color: theme.ink }}
+          />
+        </Field>
+      )}
+
+      {mobile && (
+        <Field label="Tap to turn pages" theme={theme}>
+          <SegRow<"on" | "off">
+            theme={theme}
+            value={t.mobileTapNav ? "on" : "off"}
+            onChange={(v) => setTweak("mobileTapNav", v === "on")}
+            options={[
+              { value: "on", label: <span style={{ fontSize: 11 }}>On</span> },
+              { value: "off", label: <span style={{ fontSize: 11 }}>Off</span> },
+            ]}
           />
         </Field>
       )}

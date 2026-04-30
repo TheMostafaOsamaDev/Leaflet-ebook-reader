@@ -12,6 +12,7 @@ export const DEFAULT_TWEAKS: Tweaks = {
   textAlign: "auto",
   readingMode: "paginated-2",
   pageWidth: 900,
+  mobileTapNav: true,
 };
 
 function load(): Tweaks {

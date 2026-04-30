@@ -32,4 +32,8 @@ export interface Tweaks {
   /** Reading column width in px. Caps the book body in scroll mode; ignored
       in paginated modes where columns fill the container. */
   pageWidth: number;
+  /** Mobile only — tap the right edge of the book to scroll forward a
+      page-worth, the left edge to scroll back. The center third still
+      toggles the reader chrome. Ignored on desktop. */
+  mobileTapNav: boolean;
 }
