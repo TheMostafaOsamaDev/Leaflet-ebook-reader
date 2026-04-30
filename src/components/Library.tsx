@@ -126,9 +126,24 @@ export function Library({ theme, layout, onOpen }: Props) {
     setError(null);
     try {
       const entry = await pickAndImportDocx();
-      if (entry) await refresh();
+      if (entry) {
+        await refresh();
+        // Toast on success so the user has a persistent confirmation that
+        // outlives the import-progress modal's auto-dismiss. Without this,
+        // a fast import looked like nothing happened.
+        showToast(
+          "info",
+          `Imported “${entry.title}” — ${entry.chapterCount} chapter${entry.chapterCount === 1 ? "" : "s"}.`,
+        );
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      // Surface failures both inline (red banner) and as a toast — the
+      // import-progress modal also shows the error, but it's easy to miss
+      // if it's been minimized to the dock.
+      console.error("docx import failed:", e);
+      setError(message);
+      showToast("error", `Import failed: ${message}`);
     } finally {
       setImporting(false);
     }
