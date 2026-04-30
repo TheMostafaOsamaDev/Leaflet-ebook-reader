@@ -208,6 +208,14 @@ export function DesktopReader({
       }
       return;
     }
+    // When resuming at the very first paragraph, snap to scrollTop=0 so
+    // the chapter heading (Chapter N of M + title) BookBody renders above
+    // paragraph 0 stays visible. Using paragraph 0's offsetTop scrolls the
+    // heading off-screen and looks like the title is clipped on load.
+    if (livePara.current === 0) {
+      el.scrollTop = 0;
+      return;
+    }
     const target = el.querySelector<HTMLElement>(
       `[data-p-index="${livePara.current}"]`,
     );
