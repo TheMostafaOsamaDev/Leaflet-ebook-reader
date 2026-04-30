@@ -6,13 +6,17 @@ import { EditBookModal } from "./EditBookModal";
 import { ContextMenu } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
+import { ImportChoiceModal } from "./ImportChoiceModal";
+import { DocxManageView } from "./DocxManageView";
 import {
   clearLibrary,
+  commitStagedDocx,
   coverSrcFor,
   listBooks,
   pickAndImportDocx,
   pickAndImportEpub,
   pickAndImportFolder,
+  pickAndStageDocx,
   deleteBook,
   rescanCover,
   setCoverFromFile,
@@ -21,6 +25,7 @@ import {
   type BookIndexEntry,
   type BookStatus,
 } from "../store/library";
+import { disposeStaging, type StagedDocx } from "../docx/stage";
 import { paletteForId } from "../store/palette";
 import {
   FONT_SERIF_DISPLAY,
@@ -120,7 +125,23 @@ export function Library({ theme, layout, onOpen }: Props) {
     }
   };
 
-  const onImportDocx = async () => {
+  // Two-step .docx import flow:
+  //   click "Import .docx" → ImportChoiceModal opens
+  //     → "Add directly"      → onImportDocxDirect (legacy path)
+  //     → "Manage before…"    → onImportDocxStage (opens DocxManageView)
+  // `stagedDocx` is the in-memory session for the manage view; while it's
+  // non-null the manage overlay renders.
+  const [docxChoiceOpen, setDocxChoiceOpen] = useState(false);
+  const [stagedDocx, setStagedDocx] = useState<StagedDocx | null>(null);
+
+  const onImportDocx = () => {
+    if (importing) return;
+    setError(null);
+    setDocxChoiceOpen(true);
+  };
+
+  const onImportDocxDirect = async () => {
+    setDocxChoiceOpen(false);
     if (importing) return;
     setImporting(true);
     setError(null);
@@ -148,6 +169,67 @@ export function Library({ theme, layout, onOpen }: Props) {
       setImporting(false);
     }
   };
+
+  const onImportDocxStage = async () => {
+    setDocxChoiceOpen(false);
+    if (importing) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const staged = await pickAndStageDocx();
+      if (staged) setStagedDocx(staged);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("docx staging failed:", e);
+      setError(message);
+      showToast("error", `Couldn't read document: ${message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const onStagingCancel = useCallback(() => {
+    if (stagedDocx) disposeStaging(stagedDocx);
+    setStagedDocx(null);
+  }, [stagedDocx]);
+
+  const onStagingCommit = useCallback(
+    async (
+      edits: Parameters<typeof commitStagedDocx>[1],
+      meta: Parameters<typeof commitStagedDocx>[2],
+    ) => {
+      if (!stagedDocx) return;
+      try {
+        const entry = await commitStagedDocx(stagedDocx, edits, meta);
+        // Free blob URLs and close the manage overlay before refreshing
+        // the library so the staged-doc memory drops out of the heap
+        // before the (potentially large) library list re-renders.
+        disposeStaging(stagedDocx);
+        setStagedDocx(null);
+        await refresh();
+        showToast(
+          "info",
+          `Imported “${entry.title}” — ${entry.chapterCount} chapter${entry.chapterCount === 1 ? "" : "s"}.`,
+        );
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error("docx commit failed:", e);
+        showToast("error", `Couldn't add to library: ${message}`);
+        // Re-throw so the manage view can render its inline error and
+        // re-enable the Add button.
+        throw e;
+      }
+    },
+    [refresh, showToast, stagedDocx],
+  );
+
+  // Last-ditch cleanup if the component unmounts while a staging session
+  // is still alive (rare — usually only on hot-reload during development).
+  useEffect(() => {
+    return () => {
+      if (stagedDocx) disposeStaging(stagedDocx);
+    };
+  }, [stagedDocx]);
 
   const onImportFolder = async () => {
     if (importing) return;
@@ -375,6 +457,23 @@ export function Library({ theme, layout, onOpen }: Props) {
           confirmVariant="destructive"
           onConfirm={performDelete}
           onCancel={cancelDelete}
+        />
+      )}
+      {docxChoiceOpen && (
+        <ImportChoiceModal
+          theme={theme}
+          onDirect={onImportDocxDirect}
+          onManage={onImportDocxStage}
+          onCancel={() => setDocxChoiceOpen(false)}
+        />
+      )}
+      {stagedDocx && (
+        <DocxManageView
+          theme={theme}
+          layout={layout}
+          staged={stagedDocx}
+          onCommit={onStagingCommit}
+          onCancel={onStagingCancel}
         />
       )}
     </>

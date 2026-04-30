@@ -1,13 +1,25 @@
 // Top-level orchestration for "pick a .docx → produce EPUB bytes".
 //
+// Two entry points:
+//
+//   docxToEpubBytes(bytes, fallbackTitle)
+//       Direct path. Convert + immediately build with default edits
+//       (keep all blocks, first image becomes cover). Used by the legacy
+//       "Add directly to library" choice.
+//
+//   convertDocxToStaging(bytes, fallbackTitle)  +  buildEpubFromStaging(…)
+//       Two-phase path used by the "Manage before importing" choice. The
+//       first call does the heavy mammoth conversion and returns a session
+//       the manage UI can render against. The second call applies the
+//       user's keep/delete + cover-pick edits and finishes the EPUB build.
+//
 // Each stage advances the import-progress store so the modal stepper +
 // minimized dock can show what's happening. Stages:
 //
 //   read      — read the file off disk
 //   lang      — pull language + RTL/LTR out of the docx package
-//   convert   — mammoth: docx → HTML; first image becomes cover, the rest
-//                are extracted as separate files referenced by relative href
-//   chapters  — split the HTML into chapter docs by detected heading level
+//   convert   — mammoth: docx → HTML + staged images
+//   chapters  — parse the HTML into top-level blocks the manage UI lists
 //   epub      — assemble the EPUB3 zip
 //   save      — hand off to the existing importEpubBytes() pipeline
 //
@@ -18,11 +30,17 @@
 import JSZip from "jszip";
 import { detectDocDirection, type Dir } from "./detectDirection";
 import { splitHtmlIntoChapters, type DocChapter } from "./splitChapters";
+import { buildEpub } from "./buildEpub";
 import {
-  buildEpub,
-  type EpubBuildImage,
-  type EpubCoverInput,
-} from "./buildEpub";
+  createBlocksFromHtml,
+  defaultEdits,
+  disposeStaging,
+  finalizeStaging,
+  stagingSrc,
+  type StagedDocx,
+  type StagedImage,
+  type StagingEdits,
+} from "./stage";
 
 // Mammoth's browser bundle is ~700KB — lazy-load it so it doesn't ship on
 // app start. The first .docx import pays the load cost (one HTTP-cached
@@ -52,67 +70,127 @@ export interface DocxStageHooks {
   epub?: () => void | Promise<void>;
 }
 
+// ── direct path (used by "Add directly to library") ─────────────────────────
+
 /** Convert raw docx bytes into EPUB bytes, advancing per-stage progress
- *  hooks along the way. The caller picks the file and saves the result. */
+ *  hooks along the way. The caller picks the file and saves the result.
+ *  Internally runs the same staging pipeline as the manage flow with
+ *  default keep-all + first-image-as-cover edits, then disposes the
+ *  staging session before returning. */
 export async function docxToEpubBytes(
   fileBytes: Uint8Array,
   fallbackTitle: string,
   hooks: DocxStageHooks = {},
 ): Promise<DocxImportResult> {
+  const staged = await convertDocxToStaging(fileBytes, fallbackTitle, hooks);
+  try {
+    return await buildEpubFromStaging(
+      staged,
+      defaultEdits(staged),
+      { title: staged.fallbackTitle, author: "Unknown author" },
+      { epub: hooks.epub },
+    );
+  } finally {
+    disposeStaging(staged);
+  }
+}
+
+// ── two-phase path (used by "Manage before importing") ──────────────────────
+
+/** Run the heavy mammoth conversion + block extraction. Returns an in-memory
+ *  staging session — image bytes + blob URLs live until disposeStaging() is
+ *  called. */
+export async function convertDocxToStaging(
+  fileBytes: Uint8Array,
+  fallbackTitle: string,
+  hooks: DocxStageHooks = {},
+): Promise<StagedDocx> {
   // Direction + language. Done from the raw zip directly so we don't need
   // to wait on mammoth.
   await hooks.lang?.();
   // JSZip's loadAsync expects the underlying buffer (not the Uint8Array view)
   // — Tauri's plugin-fs returns a Uint8Array whose .buffer may be larger than
   // the view, so slice it cleanly.
-  const arrayBuffer = fileBytes.byteOffset === 0 &&
+  const arrayBuffer =
+    fileBytes.byteOffset === 0 &&
     fileBytes.byteLength === fileBytes.buffer.byteLength
-    ? (fileBytes.buffer as ArrayBuffer)
-    : (fileBytes.slice().buffer as ArrayBuffer);
+      ? (fileBytes.buffer as ArrayBuffer)
+      : (fileBytes.slice().buffer as ArrayBuffer);
   const zip = await JSZip.loadAsync(arrayBuffer);
   const { lang, dir } = await detectDocDirection(zip);
 
-  // Mammoth conversion + image extraction (first image → cover, rest →
-  // separate files).
+  // Mammoth conversion + image extraction. Every image becomes a staging
+  // entry; HTML keeps `staging://<id>` markers so cover/in-flow choice can
+  // be deferred to commit time.
   await hooks.convert?.();
-  const { html, cover, images } = await convertDocxToHtml(arrayBuffer);
+  const { html, imagesById, imageOrder } =
+    await convertDocxToHtmlAndImages(arrayBuffer);
 
-  // Chapter detection.
+  // Block extraction — the manage view's primary unit.
   await hooks.chapters?.();
-  const chapters = splitHtmlIntoChapters(html);
+  const blocks = createBlocksFromHtml(html);
 
-  // EPUB assembly. Title falls back to the picker filename — the user can
-  // edit it later via the library's "Edit details" dialog.
+  const headingBlock = blocks.find((b) => b.type.startsWith("h"));
+  const guessedTitle =
+    headingBlock?.textPreview.trim().length
+      ? headingBlock.textPreview.trim()
+      : fallbackTitle;
+
+  return {
+    sourceFilename: fallbackTitle,
+    fallbackTitle: guessedTitle,
+    language: lang,
+    dir,
+    blocks,
+    imagesById,
+    imageOrder,
+  };
+}
+
+/** Apply the user's edits + assemble the EPUB. Caller is responsible for
+ *  disposing the staging session afterwards (success and failure both). */
+export async function buildEpubFromStaging(
+  staged: StagedDocx,
+  edits: StagingEdits,
+  meta: { title: string; author: string },
+  hooks: { epub?: () => void | Promise<void> } = {},
+): Promise<DocxImportResult> {
+  const { html, images, cover } = finalizeStaging(staged, edits);
+  const chapters = splitHtmlIntoChapters(html);
   await hooks.epub?.();
   const epubBytes = await buildEpub(
     {
-      title: deriveTitle(chapters, fallbackTitle),
-      author: "Unknown author",
-      language: lang,
-      dir,
+      title: deriveTitle(chapters, meta.title),
+      author: meta.author,
+      language: staged.language,
+      dir: staged.dir,
     },
     chapters,
     cover,
     images,
   );
-
-  return { epubBytes, lang, dir, chapterCount: chapters.length };
+  return {
+    epubBytes,
+    lang: staged.language,
+    dir: staged.dir,
+    chapterCount: chapters.length,
+  };
 }
 
 // ── internals ─────────────────────────────────────────────────────────────
 
 interface ConvertResult {
   html: string;
-  cover: EpubCoverInput | null;
-  images: EpubBuildImage[];
+  imagesById: Map<string, StagedImage>;
+  imageOrder: string[];
 }
 
-async function convertDocxToHtml(
+async function convertDocxToHtmlAndImages(
   arrayBuffer: ArrayBuffer,
 ): Promise<ConvertResult> {
   const mammoth = await loadMammoth();
-  let cover: EpubCoverInput | null = null;
-  const images: EpubBuildImage[] = [];
+  const imagesById = new Map<string, StagedImage>();
+  const imageOrder: string[] = [];
 
   const result = await mammoth.convertToHtml(
     { arrayBuffer },
@@ -121,34 +199,27 @@ async function convertDocxToHtml(
         const buffer = await image.readAsArrayBuffer();
         const bytes = new Uint8Array(buffer);
         const ext = extensionFromMime(image.contentType);
-
-        if (cover === null) {
-          // First image becomes the cover. We return src="" so a regex pass
-          // below strips this <img> from the chapter body — no broken-image
-          // render and no duplicate of the cover in chapter content.
-          cover = { bytes, mimeType: image.contentType, extension: ext };
-          return { src: "", alt: "" };
-        }
-
-        // Each subsequent image gets a stable href relative to the chapter
-        // file. The same path layout the EPUB parser expects for image
-        // items (`images/img-NNN.ext`), so the parse-back roundtrip is a
-        // straight read of the same bytes off disk.
-        const idx = images.length + 1;
-        const href = `images/img-${String(idx).padStart(3, "0")}.${ext}`;
-        images.push({
-          href,
+        const id = `img-${String(imageOrder.length + 1).padStart(3, "0")}`;
+        // Slice the buffer for the Blob — the same `bytes` Uint8Array is
+        // also stashed in imagesById.bytes for the EPUB build, so we want
+        // each consumer to own its own ArrayBuffer.
+        const blob = new Blob([bytes.slice().buffer], {
+          type: image.contentType,
+        });
+        const blobUrl = URL.createObjectURL(blob);
+        imagesById.set(id, {
+          id,
           bytes,
           mimeType: image.contentType,
+          extension: ext,
+          blobUrl,
         });
-        return { src: href };
+        imageOrder.push(id);
+        return { src: stagingSrc(id) };
       }),
     },
   );
-
-  // Strip the empty <img> we left where the cover used to be.
-  const cleaned = result.value.replace(/<img\b[^>]*src=""[^>]*\/?>/gi, "");
-  return { html: cleaned, cover, images };
+  return { html: result.value, imagesById, imageOrder };
 }
 
 function deriveTitle(chapters: DocChapter[], fallback: string): string {

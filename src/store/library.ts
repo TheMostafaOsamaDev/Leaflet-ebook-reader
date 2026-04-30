@@ -27,10 +27,16 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { parseEpub } from "../epub/parser";
 import type { EpubBook } from "../epub/types";
-import { docxToEpubBytes } from "../docx/import";
+import {
+  buildEpubFromStaging,
+  convertDocxToStaging,
+  docxToEpubBytes,
+} from "../docx/import";
+import type { StagedDocx, StagingEdits } from "../docx/stage";
 import {
   beginStep,
   completeStep,
+  dismiss as dismissImportProgress,
   failStep,
   finishImport,
   getState as getImportProgressState,
@@ -290,6 +296,113 @@ export async function pickAndImportDocx(): Promise<BookIndexEntry | null> {
         beginStep("epub");
       },
     });
+    completeStep("epub");
+
+    currentStepId = "save";
+    beginStep("save");
+    const entry = await importEpubBytes(epubBytes);
+    completeStep("save");
+    finishImport(entry.id);
+    return entry;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    failStep(currentStepId, message);
+    throw err;
+  }
+}
+
+/**
+ * "Manage before importing" entry point — picks a .docx, runs the heavy
+ * conversion through the import-progress UI, and returns an in-memory
+ * staging session for the manage view to render. The session must be
+ * either committed via {@link commitStagedDocx} or disposed by the caller
+ * (it owns blob URLs that need to be revoked).
+ *
+ * Returns null if the user cancelled the picker, or if another import is
+ * still running (the progress store is single-slot).
+ */
+export async function pickAndStageDocx(): Promise<StagedDocx | null> {
+  const picked = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Word document", extensions: ["docx"] }],
+  });
+  if (!picked) return null;
+
+  const current = getImportProgressState();
+  if (current.active && current.finishedAt === null) return null;
+
+  const fallbackTitle = filenameTitle(picked);
+
+  // Conversion-only progress — the build/save half runs later from
+  // commitStagedDocx with its own progress run.
+  startImport([
+    { id: "read", label: "Reading file" },
+    { id: "lang", label: "Detecting language" },
+    { id: "convert", label: "Converting document" },
+    { id: "chapters", label: "Preparing pages" },
+  ]);
+
+  let currentStepId = "read";
+  try {
+    beginStep("read");
+    const bytes = await readFile(picked);
+    completeStep("read");
+
+    const staged = await convertDocxToStaging(bytes, fallbackTitle, {
+      lang: () => {
+        currentStepId = "lang";
+        beginStep("lang");
+      },
+      convert: () => {
+        completeStep("lang");
+        currentStepId = "convert";
+        beginStep("convert");
+      },
+      chapters: () => {
+        completeStep("convert");
+        currentStepId = "chapters";
+        beginStep("chapters");
+      },
+    });
+    completeStep("chapters");
+    // Drop the progress UI immediately — the manage view takes over from
+    // here and the user is no longer "waiting".
+    dismissImportProgress();
+    return staged;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    failStep(currentStepId, message);
+    throw err;
+  }
+}
+
+/**
+ * Apply the user's manage-view edits + persist as a library book. Mirrors
+ * the tail end of {@link pickAndImportDocx} (build → save → finish), but
+ * starts from an existing {@link StagedDocx} session rather than a file
+ * path. The caller is responsible for disposing the staging session
+ * (revoking blob URLs) regardless of whether this resolves or rejects.
+ */
+export async function commitStagedDocx(
+  staged: StagedDocx,
+  edits: StagingEdits,
+  meta: { title: string; author: string },
+): Promise<BookIndexEntry> {
+  const current = getImportProgressState();
+  if (current.active && current.finishedAt === null) {
+    throw new Error("Another import is still in progress.");
+  }
+
+  startImport([
+    { id: "epub", label: "Building EPUB" },
+    { id: "save", label: "Adding to library" },
+  ]);
+
+  let currentStepId = "epub";
+  try {
+    beginStep("epub");
+    const { epubBytes } = await buildEpubFromStaging(staged, edits, meta);
     completeStep("epub");
 
     currentStepId = "save";
