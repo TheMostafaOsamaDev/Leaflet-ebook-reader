@@ -152,29 +152,46 @@ export function MobileReader({
     rect: DOMRect;
   } | null>(null);
 
-  // Resolve the selection only when the user *stops* selecting. pointerup
-  // covers both mouse and the iOS/Android long-press release that
-  // finalizes a touch selection. Pointerups inside our popover are
-  // ignored — those are interactions with the toolbar itself.
+  // Resolve the selection on `selectionchange` rather than pointerup.
+  // The Android WebView's long-press selection emerges asynchronously
+  // after the touch begins, and dragging the handles doesn't re-fire
+  // pointerup — so the old listener missed every selection past the
+  // initial single word. We debounce ~220ms to wait for the user to
+  // settle on a final range before measuring it.
+  //
+  // We never *clear* selAnchor here — outside-tap dismissal is handled
+  // by the click listener below. That keeps the popover alive while
+  // the note textarea has focus (selection collapses to the caret,
+  // which would otherwise hide the toolbar mid-typing).
   useEffect(() => {
-    const onPointerUp = (e: PointerEvent) => {
-      const path = (e.composedPath?.() ?? []) as EventTarget[];
-      const inPopover = path.some(
-        (node) =>
-          node instanceof HTMLElement &&
-          node.dataset.popover === "highlight",
-      );
-      if (inPopover) return;
-      window.setTimeout(() => {
-        const next = resolveSelectionAnchor();
-        if (next) {
-          setSelAnchor(next);
-          setActiveHl(null);
-        }
-      }, 0);
+    let timer: number | null = null;
+    const settle = () => {
+      timer = null;
+      // Skip while the user is interacting with the popover itself
+      // (e.g. typing in the note textarea — selectionchange fires for
+      // every keystroke).
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        active.closest('[data-popover="highlight"]')
+      ) {
+        return;
+      }
+      const next = resolveSelectionAnchor();
+      if (next) {
+        setSelAnchor(next);
+        setActiveHl(null);
+      }
     };
-    document.addEventListener("pointerup", onPointerUp);
-    return () => document.removeEventListener("pointerup", onPointerUp);
+    const onSelectionChange = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(settle, 220);
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+      if (timer) window.clearTimeout(timer);
+    };
   }, []);
 
   // All popover dismissal flows through clicks: tap an existing
