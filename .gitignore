@@ -12,9 +12,21 @@ dist
 dist-ssr
 *.local
 
+# TypeScript / Vite build artefacts
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Tauri
 src-tauri/target
-src-tauri/gen
+src-tauri/gen/schemas
+src-tauri/gen/android/.gradle
+src-tauri/gen/android/build
+src-tauri/gen/android/**/build
+src-tauri/gen/android/buildSrc/.gradle
+src-tauri/gen/android/app/.cxx
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/.idea
 
 # Claude Code
 .claude
