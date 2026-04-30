@@ -329,7 +329,37 @@ export function MobileReader({
 
       <div
         ref={scrollRef}
-        onClick={() => setShowChrome((s) => !s)}
+        onClick={(e) => {
+          // Tapping a highlight goes through the document-level click
+          // handler (it opens the action popover); toggle chrome to
+          // match the existing behavior in that case.
+          const target = e.target as HTMLElement | null;
+          if (target?.closest("[data-h-id]")) {
+            setShowChrome((s) => !s);
+            return;
+          }
+          // Tap-zones off → simple chrome toggle (the legacy gesture).
+          if (!t.mobileTapNav) {
+            setShowChrome((s) => !s);
+            return;
+          }
+          // Three vertical bands: left third pages back, right third
+          // pages forward, center toggles the chrome. We page by ~one
+          // viewport with a small overlap so the user keeps a line of
+          // context across the jump.
+          const el = e.currentTarget;
+          const rect = el.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const edge = rect.width / 3;
+          const stride = Math.max(120, rect.height - 80);
+          if (x < edge) {
+            el.scrollBy({ top: -stride, behavior: "smooth" });
+          } else if (x > rect.width - edge) {
+            el.scrollBy({ top: stride, behavior: "smooth" });
+          } else {
+            setShowChrome((s) => !s);
+          }
+        }}
         style={{
           flex: 1,
           overflow: "auto",
@@ -546,6 +576,7 @@ export function MobileReader({
                 onClose={() => setSheet(null)}
                 width="100%"
                 side={undefined}
+                mobile
               />
             )}
             {sheet === "progress" && (
