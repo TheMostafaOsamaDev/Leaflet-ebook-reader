@@ -41,7 +41,12 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
 
-  const isMobile = useMediaQuery("(max-width: 720px)");
+  // Phones in landscape exceed 720px wide but still need the mobile reader
+  // (tap-to-toggle chrome, single-column layout). Treat any coarse-pointer
+  // device with a short viewport as mobile too.
+  const isMobile = useMediaQuery(
+    "(max-width: 720px), (pointer: coarse) and (max-height: 480px)",
+  );
   const themeKey = t.theme;
   const theme = THEMES[themeKey];
 
