@@ -90,8 +90,8 @@ export function VolumeActionsMenu({
         // percentage still bounds it on short phones.
         height="min(46%, 320px)"
       >
-        <div style={{ padding: "4px 8px 16px" }}>
-          <div style={{ padding: "0 12px 12px" }}>
+        <div style={{ paddingBlock: "4px 16px", paddingInline: 8 }}>
+          <div style={{ paddingBlock: "0 12px", paddingInline: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
             <div style={{ fontSize: 12, color: theme.muted }}>{subtitle}</div>
           </div>
@@ -138,9 +138,11 @@ function DesktopPopover({
       style={{
         position: "fixed",
         // Clamp so a volume header near the viewport edge doesn't push
-        // the menu off-screen.
-        top: Math.min(anchor.y + 6, window.innerHeight - 190),
-        left: Math.min(anchor.x, window.innerWidth - 270),
+        // the menu off-screen. The floor matters in a resized dev-server
+        // browser window (below the packaged app's 720x540 minimum, this
+        // is otherwise unreachable).
+        top: Math.max(8, Math.min(anchor.y + 6, window.innerHeight - 190)),
+        left: Math.max(8, Math.min(anchor.x, window.innerWidth - 270)),
         zIndex: 9800,
         minWidth: 250,
         padding: 5,

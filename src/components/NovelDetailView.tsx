@@ -1811,6 +1811,11 @@ function VolumesAccordion({
   const [volumeMenu, setVolumeMenu] = useState<
     { id: number; x: number; y: number } | null
   >(null);
+  // Stable identity so VolumeActionsMenu's DesktopPopover effect (which
+  // depends on onClose) doesn't tear down and re-add its window
+  // listeners on every parent re-render (the download-queue subscription
+  // above re-renders this component frequently while the popover is open).
+  const closeVolumeMenu = useCallback(() => setVolumeMenu(null), []);
   /** Chapters staged for a bulk delete, awaiting the user's confirm. */
   const [deleteConfirm, setDeleteConfirm] = useState<{
     ids: number[];
@@ -2257,8 +2262,20 @@ function VolumesAccordion({
           </div>
         );
       })}
-      {volumeMenu && (() => {
-        const vol = novel.volumes.find((v) => v.id === volumeMenu.id);
+      {(() => {
+        // VolumeActionsMenu stays mounted regardless of `volumeMenu` —
+        // only `open` toggles. On mobile this is load-bearing: its
+        // MobileSheet plays a slide-down exit whose setTimeout unmount
+        // never gets to run if the whole tree is torn down synchronously
+        // in the same render that nulls `volumeMenu` (see AnimatedDialog's
+        // and DownloadRangeDialog's identical always-mounted convention).
+        // The derived values below tolerate `volumeMenu === null` — once
+        // closed, MobileSheet freezes its last (non-empty) children for
+        // the exit animation, so these empty fallbacks are never actually
+        // painted; they just keep this block safe to evaluate every render.
+        const vol = volumeMenu
+          ? novel.volumes.find((v) => v.id === volumeMenu.id)
+          : undefined;
         const all = (vol?.chapters ?? []).map((c) => c.id);
         // Predicates live in chapterDeletion.ts, not inline here —
         // "both downloaded AND read" is the kind of condition that
@@ -2269,8 +2286,8 @@ function VolumesAccordion({
           <VolumeActionsMenu
             theme={theme}
             layout={layout}
-            open
-            anchor={{ x: volumeMenu.x, y: volumeMenu.y }}
+            open={volumeMenu !== null}
+            anchor={volumeMenu ? { x: volumeMenu.x, y: volumeMenu.y } : null}
             title={vol?.title ?? ""}
             subtitle={tr("novel.chapterCountShort", { n: downloaded.length })}
             actions={[
@@ -2294,7 +2311,7 @@ function VolumesAccordion({
                 ids: id === "delete-read" ? read : downloaded,
               });
             }}
-            onClose={() => setVolumeMenu(null)}
+            onClose={closeVolumeMenu}
           />
         );
       })()}
