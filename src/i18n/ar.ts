@@ -356,6 +356,11 @@ export const ar: Messages = {
   "downloads.range.nothingToDownload": "لا شيء لتنزيله",
   "downloads.range.queueButton": "إضافة {n} إلى القائمة",
 
+  "downloads.delete.chapterLabel": "حذف تنزيل الفصل {n}",
+  "downloads.delete.deleted": "تم حذف «{title}»",
+  "downloads.delete.deletedAndCancelled": "تم الإلغاء وحذف «{title}»",
+  "downloads.delete.redownload": "إعادة التنزيل",
+
   "downloads.saveOffline.title": "حفظ كتاب غير متصل",
   "downloads.saveOffline.loading": "جارٍ تحميل قائمة المجلدات…",
   "downloads.saveOffline.readError":

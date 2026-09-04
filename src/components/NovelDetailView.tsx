@@ -72,6 +72,8 @@ import { AnimatedDialog } from "./AnimatedDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ShelfChecklist } from "./ShelfChecklist";
 import type { Shelf } from "../store/shelves";
+import { Toast, type ToastMessage } from "./Toast";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 /** Debounce window for the in-novel chapter search. Same rationale as
  *  the homepage suggest debounce — fast enough to feel live, slow enough
@@ -1269,8 +1271,13 @@ function VolumeErrorPanel({ theme, message, onRetry }: VolumeErrorPanelProps) {
 // clicks. Filled in by task 10 once the queue module exists.
 
 /** Resting height of a one-line chapter row. Only a seed for the windowed
- *  list's offset table — rows that wrap get measured and corrected. */
-const CHAPTER_ROW_HEIGHT = 36;
+ *  list's offset table — rows that wrap get measured and corrected.
+ *
+ *  44px, not the old 36: the row now carries a delete action beside the
+ *  download one, and 36 put both under the 44px touch minimum. This
+ *  feeds MeasuredVirtualList's estimatedItemHeight — leaving it stale
+ *  makes the list mis-estimate its scroll extent on a 950-row volume. */
+const CHAPTER_ROW_HEIGHT = 44;
 
 interface ChapterRowProps {
   theme: Theme;
@@ -1283,6 +1290,11 @@ interface ChapterRowProps {
   queueJob: DownloadJob | undefined;
   onOpenChapter: (chapterId: number) => void;
   onFlagsChanged: () => void;
+  /** Called after a row's own delete completes. `wasRunning` is true when
+   *  the chapter had a download actually in flight at the moment of
+   *  deletion, so the caller can say "cancelled and deleted" instead of
+   *  plain "deleted". */
+  onDeleted: (chapterId: number, wasRunning: boolean) => void;
 }
 
 /**
@@ -1306,6 +1318,7 @@ const ChapterRow = memo(function ChapterRow({
   queueJob,
   onOpenChapter,
   onFlagsChanged,
+  onDeleted,
 }: ChapterRowProps) {
   return (
     <div
@@ -1323,7 +1336,7 @@ const ChapterRow = memo(function ChapterRow({
           // read, ACCENT on hover. A fixed 2px logical border (never toggled
           // to 0) so the colour change never shifts the row's layout.
           borderInlineStart: `2px solid ${read ? theme.rule : "transparent"}`,
-          paddingBlock: 9,
+          paddingBlock: 13,
           paddingInlineStart: 26,
           paddingInlineEnd: 14,
           // Dim read chapters so the list reads "checked off" without hiding
@@ -1381,6 +1394,7 @@ const ChapterRow = memo(function ChapterRow({
           chapterTitle={chapter.title}
           queueJob={queueJob}
           onChange={onFlagsChanged}
+          onDeleted={onDeleted}
         />
       )}
     </div>
@@ -1393,12 +1407,19 @@ interface ChapterDownloadButtonProps {
   chapterId: number;
   /** True when the chapter has been downloaded to disk according to
    *  the parent's flag map. The button uses this for the resting state
-   *  ("downloaded" check icon) and as a guard against re-enqueuing. */
+   *  ("downloaded" check icon, armed into a delete action) and as a
+   *  guard against re-enqueuing. */
   downloaded: boolean;
   /** Called after any state change that should refresh the parent's
-   *  flag map (download success, manual delete). The parent re-reads
-   *  source.json and rebuilds its chapter-flag lookup. */
+   *  flag map (download success). The parent re-reads source.json and
+   *  rebuilds its chapter-flag lookup. Manual delete goes through
+   *  `onDeleted` instead, which the parent uses to both refresh flags
+   *  and surface a toast. */
   onChange: () => void;
+  /** Called after this row's own delete completes. `wasRunning` is true
+   *  when the chapter had a download actually in flight at the moment
+   *  of deletion. */
+  onDeleted: (chapterId: number, wasRunning: boolean) => void;
 }
 
 function ChapterDownloadButton({
@@ -1410,6 +1431,7 @@ function ChapterDownloadButton({
   chapterTitle,
   queueJob,
   onChange,
+  onDeleted,
 }: ChapterDownloadButtonProps & {
   novelTitle: string;
   chapterTitle: string;
@@ -1420,23 +1442,34 @@ function ChapterDownloadButton({
   queueJob: import("../store/downloadQueue").DownloadJob | undefined;
 }) {
   const { tr } = useI18n();
+  // `onChange` has no call site of its own right now — the queue
+  // subscription in the parent is what actually detects a completed
+  // download and refreshes flags. Kept on the prop type (rather than
+  // removed) so it stays available without another threading pass the
+  // day something here needs to ping it directly.
+  void onChange;
+
   const onClick = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (downloaded) return;
+      if (downloaded) {
+        // Single deletes skip the dialog: a deleted chapter is always
+        // re-downloadable from the source, so the toast's action is a
+        // cheaper undo than a modal. Bulk deletes still confirm.
+        const { deleteChaptersWithQueue } = await import(
+          "../store/chapterDeletion"
+        );
+        const res = await deleteChaptersWithQueue(libraryEntryId, [chapterId]);
+        onDeleted(chapterId, res.cancelledRunning.length > 0);
+        return;
+      }
       if (queueJob) {
-        // Already queued — clicking again cancels.
         const { cancel } = await import("../store/downloadQueue");
         cancel(queueJob.id);
         return;
       }
       const { enqueue } = await import("../store/downloadQueue");
-      enqueue({
-        libraryEntryId,
-        chapterId,
-        novelTitle,
-        chapterTitle,
-      });
+      enqueue({ libraryEntryId, chapterId, novelTitle, chapterTitle });
     },
     [
       libraryEntryId,
@@ -1445,11 +1478,28 @@ function ChapterDownloadButton({
       queueJob,
       novelTitle,
       chapterTitle,
+      onDeleted,
     ],
   );
 
+  // The touch-detection idiom used elsewhere in this codebase
+  // (ContextMenu.tsx): `(hover: none)` alone misses Android Chrome
+  // configs that report `hover: hover`, so OR with `(pointer: coarse)`
+  // and fall back to navigator.maxTouchPoints.
+  const mqTouch = useMediaQuery("(hover: none), (pointer: coarse)");
+  const isTouch =
+    mqTouch ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+
+  // The downloaded row's icon is a ✓ at rest and a trash on hover or
+  // keyboard focus. The button stays in the DOM and focusable at all
+  // times — a hover-only control would be unreachable by keyboard —
+  // and touch (no hover) shows the trash permanently.
+  const [armed, setArmed] = useState(false);
+  const showTrash = downloaded && (armed || isTouch);
+
   // Resting state precedence:
-  //   downloaded (persisted)  → check icon, dim
+  //   downloaded (persisted)  → check icon, dim (trash armed on hover/focus/touch)
   //   queued                  → clock icon
   //   running                 → spinning download icon + progress %
   //   error (recent)          → info icon, warning color
@@ -1463,9 +1513,25 @@ function ChapterDownloadButton({
         : queueJob?.status === "error"
           ? "error"
           : "idle";
+
+  const iconName = showTrash
+    ? "trash"
+    : status === "downloaded"
+      ? "check"
+      : status === "queued"
+        ? "clock"
+        : status === "running"
+          ? "cloudOk"
+          : status === "error"
+            ? "info"
+            : "download";
+
+  // The downloaded label is now the delete label — an icon-only button
+  // whose aria-label still said "Downloaded" would announce the wrong
+  // action to a screen reader.
   const label =
     status === "downloaded"
-      ? tr("downloads.statusDownloaded")
+      ? tr("downloads.delete.chapterLabel", { n: chapterId })
       : status === "queued"
         ? tr("novel.queuedClickCancel")
         : status === "running"
@@ -1482,50 +1548,24 @@ function ChapterDownloadButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      disabled={status === "downloaded"}
-      // Refresh the parent's flag lookup once a download lands. The
-      // parent's onChange does a snapshot re-read; running here on
-      // every render with a useEffect would be wasteful. Instead, the
-      // parent subscribes to the queue and pings onChange when a job
-      // turns terminal.
-      onMouseLeave={() => {
-        // no-op; included for completeness — the useEffect above
-        // could also trigger onChange when status flips, but the
-        // parent re-renders on queue state anyway.
-        void onChange;
-      }}
+      onMouseEnter={() => setArmed(true)}
+      onMouseLeave={() => setArmed(false)}
+      onFocus={() => setArmed(true)}
+      onBlur={() => setArmed(false)}
       style={{
         background: "transparent",
         border: "none",
-        cursor:
-          status === "downloaded"
-            ? "default"
-            : status === "queued" || status === "running"
-              ? "pointer"
-              : "pointer",
+        cursor: "pointer",
         padding: "0 14px",
         display: "flex",
         alignItems: "center",
         gap: 4,
-        color: status === "error" ? "#b75050" : theme.muted,
-        opacity: status === "downloaded" ? 0.55 : 1,
+        color: showTrash || status === "error" ? "#b75050" : theme.muted,
+        opacity: downloaded && !showTrash ? 0.55 : 1,
         flexShrink: 0,
       }}
     >
-      <Icon
-        name={
-          status === "downloaded"
-            ? "check"
-            : status === "queued"
-              ? "clock"
-              : status === "running"
-                ? "cloudOk"
-                : status === "error"
-                  ? "info"
-                  : "download"
-        }
-        size={14}
-      />
+      <Icon name={iconName} size={14} />
       {status === "running" && (
         <span style={{ fontSize: 10, color: theme.muted }}>
           {Math.round((queueJob?.progress ?? 0) * 100)}%
@@ -1723,6 +1763,57 @@ function VolumesAccordion({
     if (!snap) return;
     onChapterFlagsChange(buildFlagMap(snap));
   }, [libraryEntryId, onChapterFlagsChange]);
+
+  // Toast + per-row delete plumbing. Reused by the bulk delete affordances
+  // (volume / read-downloads) landing in later tasks.
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const toastIdRef = useRef(0);
+  const showToast = useCallback(
+    (
+      kind: ToastMessage["kind"],
+      text: string,
+      action?: ToastMessage["action"],
+    ) => {
+      toastIdRef.current += 1;
+      setToast({ id: toastIdRef.current, kind, text, action });
+    },
+    [],
+  );
+
+  const onChapterDeleted = useCallback(
+    (chapterId: number, wasRunning: boolean) => {
+      void refreshFlags();
+      const chapter = novel.volumes
+        .flatMap((v) => v.chapters)
+        .find((c) => c.id === chapterId);
+      const title = chapter?.title ?? String(chapterId);
+      showToast(
+        "info",
+        tr(
+          wasRunning
+            ? "downloads.delete.deletedAndCancelled"
+            : "downloads.delete.deleted",
+          { title },
+        ),
+        {
+          label: tr("downloads.delete.redownload"),
+          onClick: () => {
+            void (async () => {
+              const { enqueue } = await import("../store/downloadQueue");
+              if (!libraryEntryId || !chapter) return;
+              enqueue({
+                libraryEntryId,
+                chapterId,
+                novelTitle: novel.title,
+                chapterTitle: chapter.title,
+              });
+            })();
+          },
+        },
+      );
+    },
+    [refreshFlags, showToast, tr, novel, libraryEntryId],
+  );
 
   // Per-volume "download all" — enqueues every not-yet-downloaded chapter in
   // one volume. Lazy volumes are fetched first so their chapter list exists
@@ -2096,6 +2187,7 @@ function VolumesAccordion({
                     queueJob={activeJobs.get(c.id)}
                     onOpenChapter={onOpenChapter}
                     onFlagsChanged={refreshFlags}
+                    onDeleted={onChapterDeleted}
                   />
                 )}
               />
@@ -2152,6 +2244,7 @@ function VolumesAccordion({
           />
         )}
       </AnimatedDialog>
+      <Toast theme={theme} toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

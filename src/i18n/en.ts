@@ -413,6 +413,12 @@ export const en = {
   "downloads.range.nothingToDownload": "Nothing to download",
   "downloads.range.queueButton": "Queue {n}",
 
+  // deleting downloaded chapters
+  "downloads.delete.chapterLabel": "Delete download of chapter {n}",
+  "downloads.delete.deleted": "Deleted “{title}”",
+  "downloads.delete.deletedAndCancelled": "Cancelled and deleted “{title}”",
+  "downloads.delete.redownload": "Re-download",
+
   // save-as-offline-book dialog
   "downloads.saveOffline.title": "Save as offline book",
   "downloads.saveOffline.loading": "Loading volume listing…",
