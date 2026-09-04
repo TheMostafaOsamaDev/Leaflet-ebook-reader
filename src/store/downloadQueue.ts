@@ -453,6 +453,43 @@ export function cancel(jobId: string) {
   }
 }
 
+/** Cancel any queued/running chapter job targeting these chapters of
+ *  one library entry, and report which were mid-flight.
+ *
+ *  Cancellation here is cooperative: a job that has already started
+ *  runs until its current fetch resolves and only then has its result
+ *  discarded. So a caller deleting these chapters MUST await this,
+ *  delete, and then re-check — otherwise the worker's write lands
+ *  after the delete and the chapter reappears as downloaded.
+ *
+ *  `wasRunning` exists so the UI can say "Cancelled and deleted"
+ *  instead of a bare "Deleted" for a download the user could see
+ *  spinning. */
+export function cancelJobsForChapters(
+  libraryEntryId: string,
+  chapterIds: number[],
+): { cancelled: number[]; wasRunning: number[] } {
+  if (chapterIds.length === 0) return { cancelled: [], wasRunning: [] };
+  const wanted = new Set(chapterIds);
+  const cancelledIds: number[] = [];
+  const wasRunning: number[] = [];
+  // Snapshot first: cancel() mutates job status, and mutating while
+  // iterating state.jobs risks skipping entries.
+  const targets = state.jobs.filter(
+    (j) =>
+      j.kind === "chapter" &&
+      j.libraryEntryId === libraryEntryId &&
+      wanted.has(j.chapterId) &&
+      (j.status === "queued" || j.status === "running"),
+  ) as ChapterDownloadJob[];
+  for (const j of targets) {
+    if (j.status === "running") wasRunning.push(j.chapterId);
+    else cancelledIds.push(j.chapterId);
+    cancel(j.id);
+  }
+  return { cancelled: cancelledIds, wasRunning };
+}
+
 export function clearTerminals() {
   state.jobs = state.jobs.filter(
     (j) => j.status === "queued" || j.status === "running",
@@ -758,6 +795,11 @@ export async function downloadChapter(
     return local ? { type: "image", content: local } : ln;
   });
 
+  // Last cooperative cancellation check before anything is persisted.
+  // runChapterJob's onProgress throws CancelledError when the job has
+  // been cancelled, so this is the poll that stops a delete from being
+  // undone by a worker that was already past its image loop.
+  onProgress?.(0.9);
   await writeChapterContent(libraryEntryId, chapterId, rewritten, imageFiles);
   onProgress?.(0.95);
   await markChapterDownloaded(libraryEntryId, chapterId);

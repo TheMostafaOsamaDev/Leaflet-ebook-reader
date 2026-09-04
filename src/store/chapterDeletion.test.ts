@@ -1,0 +1,108 @@
+// Cover for the delete orchestration seam: the cancel -> await ->
+// delete -> re-check ordering, and the two preset predicates the
+// volume menu and selection mode both use.
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+let cancelCalls: Array<{ entryId: string; ids: number[] }> = [];
+let deleteCalls: number[][] = [];
+/** Flipped on by a test to simulate a worker that finished mid-sweep
+ *  and wrote downloadedAt back on. */
+let resurrect: number[] = [];
+let wasRunning: number[] = [];
+
+vi.mock("./downloadQueue", () => ({
+  cancelJobsForChapters: (entryId: string, ids: number[]) => {
+    cancelCalls.push({ entryId, ids });
+    return { cancelled: [], wasRunning };
+  },
+}));
+vi.mock("./sourceLibrary", () => ({
+  deleteChapterDownloads: async (_e: string, ids: number[]) => {
+    deleteCalls.push(ids);
+    // First pass reports the resurrected chapter as still downloaded,
+    // exactly as a re-read of source.json would after a late write.
+    const stillDownloaded = deleteCalls.length === 1 ? resurrect : [];
+    return {
+      removed: ids,
+      snapshot: {
+        volumes: [
+          {
+            chapters: ids.map((id) => ({
+              id,
+              ...(stillDownloaded.includes(id) ? { downloadedAt: 1 } : {}),
+            })),
+          },
+        ],
+      },
+    };
+  },
+}));
+
+import {
+  deleteChaptersWithQueue,
+  downloadedChapterIds,
+  readDownloadedChapterIds,
+} from "./chapterDeletion";
+
+beforeEach(() => {
+  cancelCalls = [];
+  deleteCalls = [];
+  resurrect = [];
+  wasRunning = [];
+});
+
+describe("deleteChaptersWithQueue", () => {
+  it("cancels before it deletes", async () => {
+    await deleteChaptersWithQueue("e1", [1, 2]);
+    expect(cancelCalls).toEqual([{ entryId: "e1", ids: [1, 2] }]);
+    expect(deleteCalls[0]).toEqual([1, 2]);
+  });
+
+  it("re-deletes a chapter a late worker write resurrected", async () => {
+    wasRunning = [2];
+    resurrect = [2];
+    const res = await deleteChaptersWithQueue("e1", [1, 2]);
+    // Second sweep targets only the chapter that came back. Without
+    // it the delete silently reverts and the row flips to downloaded.
+    expect(deleteCalls).toHaveLength(2);
+    expect(deleteCalls[1]).toEqual([2]);
+    expect(res.cancelledRunning).toEqual([2]);
+  });
+
+  it("does not sweep twice when nothing was running", async () => {
+    wasRunning = [];
+    await deleteChaptersWithQueue("e1", [1, 2]);
+    expect(deleteCalls).toHaveLength(1);
+  });
+
+  it("is a no-op for an empty id list", async () => {
+    const res = await deleteChaptersWithQueue("e1", []);
+    expect(res).toEqual({ removed: [], cancelledRunning: [] });
+    expect(cancelCalls).toEqual([]);
+    expect(deleteCalls).toEqual([]);
+  });
+});
+
+describe("preset predicates", () => {
+  const flags = new Map([
+    [1, { downloadedAt: 10, readAt: 20 }], // downloaded + read
+    [2, { downloadedAt: 10 }],             // downloaded, unread
+    [3, { readAt: 20 }],                   // read, never downloaded
+    [4, {}],                               // neither
+  ]);
+
+  it("downloadedChapterIds picks everything on disk", () => {
+    expect(downloadedChapterIds([1, 2, 3, 4], flags)).toEqual([1, 2]);
+  });
+
+  it("readDownloadedChapterIds needs BOTH flags", () => {
+    // 3 is read but has nothing on disk to free; 2 is on disk but the
+    // user hasn't finished it.
+    expect(readDownloadedChapterIds([1, 2, 3, 4], flags)).toEqual([1]);
+  });
+
+  it("ignores ids absent from the flag map", () => {
+    expect(downloadedChapterIds([99], flags)).toEqual([]);
+    expect(readDownloadedChapterIds([99], flags)).toEqual([]);
+  });
+});
