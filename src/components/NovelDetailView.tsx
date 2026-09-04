@@ -1289,7 +1289,6 @@ interface ChapterRowProps {
   novelTitle: string;
   queueJob: DownloadJob | undefined;
   onOpenChapter: (chapterId: number) => void;
-  onFlagsChanged: () => void;
   /** Called after a row's own delete completes. `wasRunning` is true when
    *  the chapter had a download actually in flight at the moment of
    *  deletion, so the caller can say "cancelled and deleted" instead of
@@ -2171,7 +2170,6 @@ function VolumesAccordion({
                     novelTitle={novel.title}
                     queueJob={activeJobs.get(c.id)}
                     onOpenChapter={onOpenChapter}
-                    onFlagsChanged={refreshFlags}
                     onDeleted={onChapterDeleted}
                   />
                 )}
