@@ -430,6 +430,10 @@ export const en = {
   "downloads.delete.confirmButtonOther": "Delete {n}",
   "downloads.delete.deletedCountOne": "Deleted 1 download",
   "downloads.delete.deletedCountOther": "Deleted {n} downloads",
+  "downloads.delete.selectionCount": "{n} selected",
+  "downloads.delete.selectAllDownloaded": "Select all downloaded",
+  "downloads.delete.exitSelection": "Exit selection",
+  "downloads.delete.selectChapter": "Select chapter {n}",
 
   // save-as-offline-book dialog
   "downloads.saveOffline.title": "Save as offline book",

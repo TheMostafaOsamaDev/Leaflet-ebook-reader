@@ -372,6 +372,10 @@ export const ar: Messages = {
   "downloads.delete.confirmButtonOther": "حذف {n}",
   "downloads.delete.deletedCountOne": "تم حذف تنزيل واحد",
   "downloads.delete.deletedCountOther": "تم حذف {n} تنزيلات",
+  "downloads.delete.selectionCount": "{n} محدد",
+  "downloads.delete.selectAllDownloaded": "تحديد كل المنزَّل",
+  "downloads.delete.exitSelection": "إنهاء التحديد",
+  "downloads.delete.selectChapter": "تحديد الفصل {n}",
 
   "downloads.saveOffline.title": "حفظ كتاب غير متصل",
   "downloads.saveOffline.loading": "جارٍ تحميل قائمة المجلدات…",

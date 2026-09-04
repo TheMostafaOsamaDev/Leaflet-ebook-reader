@@ -74,6 +74,7 @@ import { ShelfChecklist } from "./ShelfChecklist";
 import type { Shelf } from "../store/shelves";
 import { Toast, type ToastMessage } from "./Toast";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useLongPress } from "../hooks/useLongPress";
 import { VolumeActionsMenu } from "./VolumeActionsMenu";
 import {
   downloadedChapterIds,
@@ -1299,6 +1300,16 @@ interface ChapterRowProps {
    *  deletion, so the caller can say "cancelled and deleted" instead of
    *  plain "deleted". */
   onDeleted: (chapterId: number, wasRunning: boolean) => void;
+  /** True once the accordion is in selection mode (any row long-pressed
+   *  or right-clicked). Swaps the row's click behaviour from "open
+   *  chapter" to "toggle selection" and reveals the checkbox. */
+  selecting: boolean;
+  /** Whether THIS row is in the parent's selected set. A boolean, not
+   *  the Set itself, so only the rows whose selectedness actually
+   *  changed re-render under `memo`. */
+  selected: boolean;
+  onToggleSelect: (chapterId: number) => void;
+  onEnterSelection: (chapterId: number) => void;
 }
 
 /**
@@ -1322,23 +1333,55 @@ const ChapterRow = memo(function ChapterRow({
   queueJob,
   onOpenChapter,
   onDeleted,
+  selecting,
+  selected,
+  onToggleSelect,
+  onEnterSelection,
 }: ChapterRowProps) {
+  const { tr } = useI18n();
+  const { bind, consumeLongPress } = useLongPress(() =>
+    onEnterSelection(chapter.id),
+  );
   return (
     <div
       role="listitem"
       style={{ display: "flex", alignItems: "stretch", direction }}
     >
       <button
-        onClick={() => onOpenChapter(chapter.id)}
+        {...bind}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onEnterSelection(chapter.id);
+        }}
+        onClick={() => {
+          if (consumeLongPress()) return;
+          if (selecting) {
+            if (downloaded) onToggleSelect(chapter.id);
+            return;
+          }
+          onOpenChapter(chapter.id);
+        }}
+        role={selecting ? "option" : undefined}
+        aria-selected={selecting ? selected : undefined}
+        aria-label={
+          selecting
+            ? tr("downloads.delete.selectChapter", { n: chapter.id })
+            : undefined
+        }
         style={{
           flex: 1,
           textAlign: "start",
-          background: "transparent",
+          background: selected
+            ? `color-mix(in srgb, ${ACCENT} 10%, transparent)`
+            : "transparent",
           border: "none",
           // Start-edge accent bar — transparent by default, theme.rule when
-          // read, ACCENT on hover. A fixed 2px logical border (never toggled
-          // to 0) so the colour change never shifts the row's layout.
-          borderInlineStart: `2px solid ${read ? theme.rule : "transparent"}`,
+          // read, ACCENT on hover or when selected. A fixed 2px logical
+          // border (never toggled to 0) so the colour change never shifts
+          // the row's layout.
+          borderInlineStart: `2px solid ${
+            selected ? ACCENT : read ? theme.rule : "transparent"
+          }`,
           paddingBlock: 13,
           paddingInlineStart: 26,
           paddingInlineEnd: 14,
@@ -1357,16 +1400,38 @@ const ChapterRow = memo(function ChapterRow({
           transition: transition("border-color", "fast", "out"),
         }}
         onMouseEnter={(e) => {
+          if (selected) return;
           e.currentTarget.style.background = theme.hover;
           e.currentTarget.style.borderInlineStartColor = ACCENT;
         }}
         onMouseLeave={(e) => {
+          if (selected) return;
           e.currentTarget.style.background = "transparent";
           e.currentTarget.style.borderInlineStartColor = read
             ? theme.rule
             : "transparent";
         }}
       >
+        {selecting && (
+          <span
+            aria-hidden
+            style={{
+              width: 17,
+              height: 17,
+              borderRadius: 5,
+              flexShrink: 0,
+              display: "grid",
+              placeItems: "center",
+              border: `1.5px solid ${selected ? ACCENT : theme.ruleStrong}`,
+              background: selected ? ACCENT : "transparent",
+              color: "#fff",
+              opacity: downloaded ? 1 : 0.3,
+              transition: transition("background-color", "fast", "out"),
+            }}
+          >
+            {selected && <Icon name="check" size={11} />}
+          </span>
+        )}
         <span
           style={{
             fontSize: 11,
@@ -1387,7 +1452,7 @@ const ChapterRow = memo(function ChapterRow({
           />
         )}
       </button>
-      {libraryEntryId && (
+      {libraryEntryId && !selecting && (
         <ChapterDownloadButton
           theme={theme}
           libraryEntryId={libraryEntryId}
@@ -1821,19 +1886,43 @@ function VolumesAccordion({
     ids: number[];
   } | null>(null);
 
-  // Selection state is declared here, ahead of runBulkDelete, even
-  // though Task 5 is what uses it: runBulkDelete calls exitSelection at
-  // the end, and a `const` arrow declared below would be a
-  // used-before-declaration error. Library.tsx hoists showToast for the
-  // same reason. Task 5 fills in the rest of the selection handlers and
-  // reads these values — until then only the setters are used here, so
-  // the value bindings are elided to keep noUnusedLocals green.
-  const [, setSelecting] = useState(false);
-  const [, setSelected] = useState<Set<number>>(() => new Set());
+  // Selection state is declared here, ahead of runBulkDelete: runBulkDelete
+  // calls exitSelection at the end, and a `const` arrow declared below it
+  // would be a used-before-declaration error. Library.tsx hoists showToast
+  // for the same reason.
+  //
+  // Selection lives in the parent, not in the rows: `ChapterRow` is
+  // memoized because the parent re-renders on every download-queue tick,
+  // and a 950-row volume can't afford to reconcile all of them. Rows
+  // receive a boolean, so only the two rows whose selectedness actually
+  // changed re-render.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const exitSelection = useCallback(() => {
     setSelecting(false);
     setSelected(new Set());
   }, []);
+
+  const toggleSelected = useCallback((chapterId: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(chapterId)) next.delete(chapterId);
+      else next.add(chapterId);
+      return next;
+    });
+  }, []);
+
+  const enterSelection = useCallback(
+    (chapterId: number) => {
+      // Only downloaded chapters are selectable — selection exists in
+      // order to delete, so a row with nothing to delete in the set
+      // would need a disabled state in the action bar.
+      if (!chapterFlags.get(chapterId)?.downloadedAt) return;
+      setSelecting(true);
+      setSelected(new Set([chapterId]));
+    },
+    [chapterFlags],
+  );
 
   const runBulkDelete = useCallback(
     async (ids: number[]) => {
@@ -1852,8 +1941,6 @@ function VolumesAccordion({
           { n: res.removed.length },
         ),
       );
-      // No-op until Task 5 puts the app into selection mode; declared
-      // above so the dependency array is right from the start.
       exitSelection();
     },
     [libraryEntryId, refreshFlags, showToast, tr, exitSelection],
@@ -2015,6 +2102,91 @@ function VolumesAccordion({
       >
         {tr("novel.chaptersHeading")}
       </h2>
+      {selecting && (
+        <div
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            paddingBlock: 10,
+            paddingInline: 14,
+            background: theme.chrome,
+            borderBottom: `0.5px solid ${theme.rule}`,
+            position: "sticky",
+            top: 0,
+            zIndex: 20,
+          }}
+        >
+          <button
+            onClick={exitSelection}
+            aria-label={tr("downloads.delete.exitSelection")}
+            style={{
+              width: 32,
+              height: 32,
+              display: "grid",
+              placeItems: "center",
+              border: "none",
+              background: "transparent",
+              color: theme.muted,
+              cursor: "pointer",
+              borderRadius: 8,
+            }}
+          >
+            <Icon name="close" size={15} />
+          </button>
+          <span style={{ fontWeight: 600, fontSize: 12.5 }}>
+            {tr("downloads.delete.selectionCount", { n: selected.size })}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={() => {
+              // Predicate lives in chapterDeletion.ts, not an inline
+              // filter — it's already unit-tested there.
+              const all = novel.volumes.flatMap((v) =>
+                v.chapters.map((c) => c.id),
+              );
+              setSelected(new Set(downloadedChapterIds(all, chapterFlags)));
+            }}
+            style={{
+              font: "inherit",
+              fontSize: 11.5,
+              paddingBlock: 6,
+              paddingInline: 12,
+              borderRadius: 999,
+              border: `0.5px solid ${theme.rule}`,
+              background: "transparent",
+              color: theme.ink,
+              cursor: "pointer",
+            }}
+          >
+            {tr("downloads.delete.selectAllDownloaded")}
+          </button>
+          <button
+            disabled={selected.size === 0}
+            onClick={() => setDeleteConfirm({ ids: [...selected] })}
+            style={{
+              font: "inherit",
+              fontSize: 11.5,
+              paddingBlock: 6,
+              paddingInline: 12,
+              borderRadius: 999,
+              border: "0.5px solid #b75050",
+              background: "#b75050",
+              color: "#fff",
+              cursor: selected.size === 0 ? "default" : "pointer",
+              opacity: selected.size === 0 ? 0.45 : 1,
+            }}
+          >
+            {tr(
+              selected.size === 1
+                ? "downloads.delete.confirmButtonOne"
+                : "downloads.delete.confirmButtonOther",
+              { n: selected.size },
+            )}
+          </button>
+        </div>
+      )}
       {novel.volumes.map((v) => {
         const isOpen = open.has(v.id);
         const count = v.chapters.length > 0 ? v.chapters.length : v.chapterCount ?? 0;
@@ -2255,6 +2427,10 @@ function VolumesAccordion({
                     queueJob={activeJobs.get(c.id)}
                     onOpenChapter={onOpenChapter}
                     onDeleted={onChapterDeleted}
+                    selecting={selecting}
+                    selected={selected.has(c.id)}
+                    onToggleSelect={toggleSelected}
+                    onEnterSelection={enterSelection}
                   />
                 )}
               />
