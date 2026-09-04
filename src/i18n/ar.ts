@@ -360,6 +360,18 @@ export const ar: Messages = {
   "downloads.delete.deleted": "تم حذف «{title}»",
   "downloads.delete.deletedAndCancelled": "تم الإلغاء وحذف «{title}»",
   "downloads.delete.redownload": "إعادة التنزيل",
+  "downloads.delete.volumeActions": "إجراءات المجلد",
+  "downloads.delete.deleteRead": "حذف تنزيلات الفصول المقروءة",
+  "downloads.delete.deleteAllInVolume": "حذف كل تنزيلات المجلد",
+  "downloads.delete.nothingToDelete": "لا توجد تنزيلات للحذف",
+  "downloads.delete.confirmTitleOne": "حذف تنزيل واحد؟",
+  "downloads.delete.confirmTitleOther": "حذف {n} تنزيلات؟",
+  "downloads.delete.confirmBody":
+    "تبقى هذه الفصول في القائمة ويمكن قراءتها عبر الإنترنت أو تنزيلها مرة أخرى. ويُحتفظ بتقدّم القراءة.",
+  "downloads.delete.confirmButtonOne": "حذف واحد",
+  "downloads.delete.confirmButtonOther": "حذف {n}",
+  "downloads.delete.deletedCountOne": "تم حذف تنزيل واحد",
+  "downloads.delete.deletedCountOther": "تم حذف {n} تنزيلات",
 
   "downloads.saveOffline.title": "حفظ كتاب غير متصل",
   "downloads.saveOffline.loading": "جارٍ تحميل قائمة المجلدات…",

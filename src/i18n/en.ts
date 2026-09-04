@@ -418,6 +418,18 @@ export const en = {
   "downloads.delete.deleted": "Deleted “{title}”",
   "downloads.delete.deletedAndCancelled": "Cancelled and deleted “{title}”",
   "downloads.delete.redownload": "Re-download",
+  "downloads.delete.volumeActions": "Volume actions",
+  "downloads.delete.deleteRead": "Delete read downloads",
+  "downloads.delete.deleteAllInVolume": "Delete all downloads in volume",
+  "downloads.delete.nothingToDelete": "No downloads to delete",
+  "downloads.delete.confirmTitleOne": "Delete 1 download?",
+  "downloads.delete.confirmTitleOther": "Delete {n} downloads?",
+  "downloads.delete.confirmBody":
+    "These chapters stay in the list and can be read online or downloaded again. Your reading progress is kept.",
+  "downloads.delete.confirmButtonOne": "Delete 1",
+  "downloads.delete.confirmButtonOther": "Delete {n}",
+  "downloads.delete.deletedCountOne": "Deleted 1 download",
+  "downloads.delete.deletedCountOther": "Deleted {n} downloads",
 
   // save-as-offline-book dialog
   "downloads.saveOffline.title": "Save as offline book",

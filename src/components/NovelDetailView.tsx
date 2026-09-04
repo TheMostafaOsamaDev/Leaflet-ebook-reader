@@ -74,6 +74,11 @@ import { ShelfChecklist } from "./ShelfChecklist";
 import type { Shelf } from "../store/shelves";
 import { Toast, type ToastMessage } from "./Toast";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { VolumeActionsMenu } from "./VolumeActionsMenu";
+import {
+  downloadedChapterIds,
+  readDownloadedChapterIds,
+} from "../store/chapterDeletion";
 
 /** Debounce window for the in-novel chapter search. Same rationale as
  *  the homepage suggest debounce — fast enough to feel live, slow enough
@@ -1799,6 +1804,56 @@ function VolumesAccordion({
     [refreshFlags, showToast, tr, novel, libraryEntryId],
   );
 
+  // Volume-header overflow menu ("⋯"): delete read downloads / delete all
+  // downloads in the volume. `volumeMenu` anchors the popover/sheet at the
+  // trigger button's rect; `deleteConfirm` stages the chosen chapter ids
+  // for the ConfirmDialog.
+  const [volumeMenu, setVolumeMenu] = useState<
+    { id: number; x: number; y: number } | null
+  >(null);
+  /** Chapters staged for a bulk delete, awaiting the user's confirm. */
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    ids: number[];
+  } | null>(null);
+
+  // Selection state is declared here, ahead of runBulkDelete, even
+  // though Task 5 is what uses it: runBulkDelete calls exitSelection at
+  // the end, and a `const` arrow declared below would be a
+  // used-before-declaration error. Library.tsx hoists showToast for the
+  // same reason. Task 5 fills in the rest of the selection handlers and
+  // reads these values — until then only the setters are used here, so
+  // the value bindings are elided to keep noUnusedLocals green.
+  const [, setSelecting] = useState(false);
+  const [, setSelected] = useState<Set<number>>(() => new Set());
+  const exitSelection = useCallback(() => {
+    setSelecting(false);
+    setSelected(new Set());
+  }, []);
+
+  const runBulkDelete = useCallback(
+    async (ids: number[]) => {
+      if (!libraryEntryId || ids.length === 0) return;
+      const { deleteChaptersWithQueue } = await import(
+        "../store/chapterDeletion"
+      );
+      const res = await deleteChaptersWithQueue(libraryEntryId, ids);
+      void refreshFlags();
+      showToast(
+        "info",
+        tr(
+          res.removed.length === 1
+            ? "downloads.delete.deletedCountOne"
+            : "downloads.delete.deletedCountOther",
+          { n: res.removed.length },
+        ),
+      );
+      // No-op until Task 5 puts the app into selection mode; declared
+      // above so the dependency array is right from the start.
+      exitSelection();
+    },
+    [libraryEntryId, refreshFlags, showToast, tr, exitSelection],
+  );
+
   // Per-volume "download all" — enqueues every not-yet-downloaded chapter in
   // one volume. Lazy volumes are fetched first so their chapter list exists
   // before we enqueue. `downloadingVol` guards the brief enqueue window so a
@@ -2105,6 +2160,30 @@ function VolumesAccordion({
                   />
                 </button>
               )}
+              {libraryEntryId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setVolumeMenu({ id: v.id, x: r.left, y: r.bottom });
+                  }}
+                  title={tr("downloads.delete.volumeActions")}
+                  aria-label={tr("downloads.delete.volumeActions")}
+                  style={{
+                    flexShrink: 0,
+                    width: 42,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "none",
+                    background: "transparent",
+                    color: theme.muted,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Icon name="more" size={15} />
+                </button>
+              )}
             </div>
             {isOpen && (
               <>
@@ -2178,6 +2257,81 @@ function VolumesAccordion({
           </div>
         );
       })}
+      {volumeMenu && (() => {
+        const vol = novel.volumes.find((v) => v.id === volumeMenu.id);
+        const all = (vol?.chapters ?? []).map((c) => c.id);
+        // Predicates live in chapterDeletion.ts, not inline here —
+        // "both downloaded AND read" is the kind of condition that
+        // quietly drifts, and it needs a test.
+        const downloaded = downloadedChapterIds(all, chapterFlags);
+        const read = readDownloadedChapterIds(all, chapterFlags);
+        return (
+          <VolumeActionsMenu
+            theme={theme}
+            layout={layout}
+            open
+            anchor={{ x: volumeMenu.x, y: volumeMenu.y }}
+            title={vol?.title ?? ""}
+            subtitle={tr("novel.chapterCountShort", { n: downloaded.length })}
+            actions={[
+              {
+                id: "delete-read",
+                label: tr("downloads.delete.deleteRead"),
+                icon: "trash",
+                destructive: true,
+                disabled: read.length === 0,
+              },
+              {
+                id: "delete-all",
+                label: tr("downloads.delete.deleteAllInVolume"),
+                icon: "trash",
+                destructive: true,
+                disabled: downloaded.length === 0,
+              },
+            ]}
+            onPick={(id) => {
+              setDeleteConfirm({
+                ids: id === "delete-read" ? read : downloaded,
+              });
+            }}
+            onClose={() => setVolumeMenu(null)}
+          />
+        );
+      })()}
+
+      <AnimatedDialog
+        open={deleteConfirm !== null}
+        onScrimClick={() => setDeleteConfirm(null)}
+        zIndex={9700}
+      >
+        {deleteConfirm && (
+          <ConfirmDialog
+            theme={theme}
+            title={tr(
+              deleteConfirm.ids.length === 1
+                ? "downloads.delete.confirmTitleOne"
+                : "downloads.delete.confirmTitleOther",
+              { n: deleteConfirm.ids.length },
+            )}
+            confirmVariant="destructive"
+            confirmLabel={tr(
+              deleteConfirm.ids.length === 1
+                ? "downloads.delete.confirmButtonOne"
+                : "downloads.delete.confirmButtonOther",
+              { n: deleteConfirm.ids.length },
+            )}
+            cancelLabel={tr("common.cancel")}
+            message={tr("downloads.delete.confirmBody")}
+            onConfirm={() => {
+              const ids = deleteConfirm.ids;
+              setDeleteConfirm(null);
+              void runBulkDelete(ids);
+            }}
+            onCancel={() => setDeleteConfirm(null)}
+          />
+        )}
+      </AnimatedDialog>
+
       {/* AnimatedDialog stays mounted and takes `open` as a prop — it keeps the
           last children around to play the exit animation. Unmounting the whole
           thing on cancel would snap it off-screen instead. */}
