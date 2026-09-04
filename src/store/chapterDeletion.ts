@@ -11,7 +11,7 @@
 // calling deleteChapterDownloads directly.
 
 import { cancelJobsForChapters } from "./downloadQueue";
-import { deleteChapterDownloads } from "./sourceLibrary";
+import { deleteChapterDownloads, readSnapshot } from "./sourceLibrary";
 
 export interface DeleteChaptersResult {
   /** Chapters whose downloadedAt flag is now clear. */
@@ -57,9 +57,17 @@ export async function deleteChaptersWithQueue(
   //    re-flipped downloadedAt; sweeping those ids again is cheap and
   //    idempotent, and it is the difference between a delete that
   //    holds and one that quietly reverts.
+  //
+  //    This MUST be a fresh read from disk, not `first.snapshot`:
+  //    deleteChapterDownloads strips downloadedAt for every id it was
+  //    just asked to delete before returning that same snapshot, so
+  //    `first.snapshot` is guaranteed to already show the flag clear
+  //    for all of `ids` — checking it can never find a resurrection.
+  let removed = first.removed;
   if (wasRunning.length > 0) {
+    const freshSnap = await readSnapshot(libraryEntryId);
     const stillDownloaded = new Set<number>();
-    for (const v of first.snapshot?.volumes ?? []) {
+    for (const v of freshSnap?.volumes ?? []) {
       for (const c of v.chapters) {
         if (wasRunning.includes(c.id) && c.downloadedAt) {
           stillDownloaded.add(c.id);
@@ -67,11 +75,14 @@ export async function deleteChaptersWithQueue(
       }
     }
     if (stillDownloaded.size > 0) {
-      await deleteChapterDownloads(libraryEntryId, [...stillDownloaded]);
+      const second = await deleteChapterDownloads(libraryEntryId, [
+        ...stillDownloaded,
+      ]);
+      removed = [...new Set([...removed, ...second.removed])];
     }
   }
 
-  return { removed: first.removed, cancelledRunning: wasRunning };
+  return { removed, cancelledRunning: wasRunning };
 }
 
 /** The per-chapter flags the novel view keeps in its lookup map. */

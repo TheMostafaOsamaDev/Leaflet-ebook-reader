@@ -5,8 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let cancelCalls: Array<{ entryId: string; ids: number[] }> = [];
 let deleteCalls: number[][] = [];
+let readSnapshotCalls = 0;
 /** Flipped on by a test to simulate a worker that finished mid-sweep
- *  and wrote downloadedAt back on. */
+ *  and wrote downloadedAt back on. This can only show up in a LATER
+ *  fresh readSnapshot() read — never in deleteChapterDownloads' own
+ *  return value, which always reports the ids it was just asked to
+ *  delete as cleared. */
 let resurrect: number[] = [];
 let wasRunning: number[] = [];
 
@@ -17,23 +21,32 @@ vi.mock("./downloadQueue", () => ({
   },
 }));
 vi.mock("./sourceLibrary", () => ({
+  // Matches the real deleteChapterDownloadsImpl contract: it strips
+  // downloadedAt from every id it was just asked to delete BEFORE
+  // returning that same snapshot, so this mock's return value can
+  // never show a resurrected flag for `ids` — only a later, separate
+  // readSnapshot() read of disk can.
   deleteChapterDownloads: async (_e: string, ids: number[]) => {
     deleteCalls.push(ids);
-    // First pass reports the resurrected chapter as still downloaded,
-    // exactly as a re-read of source.json would after a late write.
-    const stillDownloaded = deleteCalls.length === 1 ? resurrect : [];
     return {
       removed: ids,
       snapshot: {
-        volumes: [
-          {
-            chapters: ids.map((id) => ({
-              id,
-              ...(stillDownloaded.includes(id) ? { downloadedAt: 1 } : {}),
-            })),
-          },
-        ],
+        volumes: [{ chapters: ids.map((id) => ({ id })) }],
       },
+    };
+  },
+  readSnapshot: async (_e: string) => {
+    readSnapshotCalls++;
+    // Only the fresh read right after the first delete can observe a
+    // resurrection; a re-delete of the resurrected id really does
+    // clear it, so a second read (if one happened) would not.
+    const stillDownloaded = readSnapshotCalls === 1 ? resurrect : [];
+    return {
+      volumes: [
+        {
+          chapters: stillDownloaded.map((id) => ({ id, downloadedAt: 1 })),
+        },
+      ],
     };
   },
 }));
@@ -47,6 +60,7 @@ import {
 beforeEach(() => {
   cancelCalls = [];
   deleteCalls = [];
+  readSnapshotCalls = 0;
   resurrect = [];
   wasRunning = [];
 });
@@ -67,12 +81,16 @@ describe("deleteChaptersWithQueue", () => {
     expect(deleteCalls).toHaveLength(2);
     expect(deleteCalls[1]).toEqual([2]);
     expect(res.cancelledRunning).toEqual([2]);
+    // The reported removed list must reflect both sweeps, not just
+    // the first (which already believed chapter 2 was cleared).
+    expect(res.removed.slice().sort()).toEqual([1, 2]);
   });
 
   it("does not sweep twice when nothing was running", async () => {
     wasRunning = [];
     await deleteChaptersWithQueue("e1", [1, 2]);
     expect(deleteCalls).toHaveLength(1);
+    expect(readSnapshotCalls).toBe(0);
   });
 
   it("is a no-op for an empty id list", async () => {

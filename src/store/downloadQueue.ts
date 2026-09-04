@@ -795,10 +795,13 @@ export async function downloadChapter(
     return local ? { type: "image", content: local } : ln;
   });
 
-  // Last cooperative cancellation check before anything is persisted.
-  // runChapterJob's onProgress throws CancelledError when the job has
-  // been cancelled, so this is the poll that stops a delete from being
-  // undone by a worker that was already past its image loop.
+  // Cancellation check before writing chapter content to disk. The
+  // existing poll right after writeChapterContent (below) is what
+  // guards markChapterDownloaded — this one is narrower: it stops
+  // writeChapterContent itself from recreating content.json and image
+  // files once cancellation is already known, which would otherwise
+  // leave orphaned files behind in a chapter directory a concurrent
+  // delete just removed.
   onProgress?.(0.9);
   await writeChapterContent(libraryEntryId, chapterId, rewritten, imageFiles);
   onProgress?.(0.95);
