@@ -1317,7 +1317,6 @@ const ChapterRow = memo(function ChapterRow({
   novelTitle,
   queueJob,
   onOpenChapter,
-  onFlagsChanged,
   onDeleted,
 }: ChapterRowProps) {
   return (
@@ -1393,7 +1392,6 @@ const ChapterRow = memo(function ChapterRow({
           novelTitle={novelTitle}
           chapterTitle={chapter.title}
           queueJob={queueJob}
-          onChange={onFlagsChanged}
           onDeleted={onDeleted}
         />
       )}
@@ -1410,12 +1408,6 @@ interface ChapterDownloadButtonProps {
    *  ("downloaded" check icon, armed into a delete action) and as a
    *  guard against re-enqueuing. */
   downloaded: boolean;
-  /** Called after any state change that should refresh the parent's
-   *  flag map (download success). The parent re-reads source.json and
-   *  rebuilds its chapter-flag lookup. Manual delete goes through
-   *  `onDeleted` instead, which the parent uses to both refresh flags
-   *  and surface a toast. */
-  onChange: () => void;
   /** Called after this row's own delete completes. `wasRunning` is true
    *  when the chapter had a download actually in flight at the moment
    *  of deletion. */
@@ -1430,7 +1422,6 @@ function ChapterDownloadButton({
   novelTitle,
   chapterTitle,
   queueJob,
-  onChange,
   onDeleted,
 }: ChapterDownloadButtonProps & {
   novelTitle: string;
@@ -1442,12 +1433,6 @@ function ChapterDownloadButton({
   queueJob: import("../store/downloadQueue").DownloadJob | undefined;
 }) {
   const { tr } = useI18n();
-  // `onChange` has no call site of its own right now — the queue
-  // subscription in the parent is what actually detects a completed
-  // download and refreshes flags. Kept on the prop type (rather than
-  // removed) so it stays available without another threading pass the
-  // day something here needs to ping it directly.
-  void onChange;
 
   const onClick = useCallback(
     async (e: React.MouseEvent) => {
