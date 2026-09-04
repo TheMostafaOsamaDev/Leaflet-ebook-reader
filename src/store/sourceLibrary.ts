@@ -477,31 +477,92 @@ export async function markChapterUnread(
   });
 }
 
-/** Drop a chapter's downloaded content + image files, and clear its
- *  downloadedAt flag. Used by "Delete download" UI. */
+/** Drop N chapters' downloaded content in one pass: sweep each
+ *  directory, then patch the snapshot ONCE.
+ *
+ *  Why batched. patchChapter reads and rewrites the whole source.json
+ *  per call, and source.json holds every chapter of the novel. Looping
+ *  the single-chapter version over a 950-chapter volume is 950 full
+ *  read+write cycles — minutes of jank on Android, and a crash halfway
+ *  leaves the snapshot and the disk disagreeing about what's on disk.
+ *
+ *  Returns the ids actually cleared so the caller can report a truthful
+ *  count. A chapter whose directory is already gone still counts as
+ *  removed: the flag is what makes a chapter "downloaded", so clearing
+ *  it is the operation that matters.
+ *
+ *  Never touches readAt. Deleting a download frees disk; it does not
+ *  reset the user's reading progress. */
+export async function deleteChapterDownloads(
+  entryId: string,
+  chapterIds: number[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ removed: number[]; snapshot: SourceSnapshot | null }> {
+  if (chapterIds.length === 0) return { removed: [], snapshot: null };
+  return withEntryLock(entryId, () =>
+    deleteChapterDownloadsImpl(entryId, chapterIds, onProgress),
+  );
+}
+
+async function deleteChapterDownloadsImpl(
+  entryId: string,
+  chapterIds: number[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ removed: number[]; snapshot: SourceSnapshot | null }> {
+  const snap = await readSnapshot(entryId);
+  if (!snap) return { removed: [], snapshot: null };
+
+  const wanted = new Set(chapterIds);
+  const total = chapterIds.length;
+  let done = 0;
+
+  for (const chapterId of chapterIds) {
+    const dir = chapterDir(entryId, chapterId);
+    try {
+      // Recursive on purpose: a chapter directory holds content.json
+      // plus inline images, and a per-file sweep would miss any
+      // subdirectory while the flag below still flips.
+      await remove(dir, { baseDir: BASE, recursive: true });
+    } catch {
+      // Already gone, or the platform refused. Either way the flag
+      // still has to clear — a stale downloadedAt pointing at nothing
+      // is the one state the reader can't recover from.
+    }
+    done++;
+    // Throttled: a 900-chapter sweep would otherwise push 900 React
+    // updates through a progress line nobody reads that closely.
+    if (done % 25 === 0 || done === total) onProgress?.(done, total);
+  }
+
+  const removed: number[] = [];
+  for (const v of snap.volumes) {
+    for (let i = 0; i < v.chapters.length; i++) {
+      const c = v.chapters[i];
+      if (!wanted.has(c.id)) continue;
+      removed.push(c.id);
+      // Rebuild without downloadedAt rather than assigning undefined,
+      // so the field is genuinely absent. readAt is carried across
+      // explicitly — this is the line that must never regress.
+      const { downloadedAt: _dropped, ...rest } = c;
+      v.chapters[i] = rest;
+    }
+  }
+
+  await writeTextFile(snapshotPath(entryId), JSON.stringify(snap), {
+    baseDir: BASE,
+  });
+  return { removed, snapshot: snap };
+}
+
+/** Drop one chapter's downloaded content + image files, and clear its
+ *  downloadedAt flag. Thin wrapper over the batch version so there is
+ *  exactly one delete code path to reason about and test. */
 export async function deleteChapterDownload(
   entryId: string,
   chapterId: number,
 ): Promise<SourceSnapshot | null> {
-  const dir = chapterDir(entryId, chapterId);
-  if (await exists(dir, { baseDir: BASE })) {
-    // Tauri's plugin-fs lacks a recursive-remove. List + unlink instead.
-    // The dir is shallow (content.json + a handful of img-XXX.ext), so
-    // a manual sweep is cheap.
-    try {
-      const { readDir } = await import("@tauri-apps/plugin-fs");
-      const entries = await readDir(dir, { baseDir: BASE });
-      for (const e of entries) {
-        if (!e.isFile) continue;
-        await remove(`${dir}/${e.name}`, { baseDir: BASE });
-      }
-      await remove(dir, { baseDir: BASE });
-    } catch {
-      // Best-effort cleanup; if it fails the next download will
-      // overwrite content.json and the flag flip below still happens.
-    }
-  }
-  return patchChapter(entryId, chapterId, () => ({ downloadedAt: undefined }));
+  const { snapshot } = await deleteChapterDownloads(entryId, [chapterId]);
+  return snapshot;
 }
 
 // ── chapter content I/O ────────────────────────────────────────────────────
