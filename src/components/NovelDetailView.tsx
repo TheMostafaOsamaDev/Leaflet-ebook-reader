@@ -1378,9 +1378,22 @@ const ChapterRow = memo(function ChapterRow({
         }}
         role={selecting ? "option" : undefined}
         aria-selected={selecting ? selected : undefined}
+        // Only downloaded rows are selectable, and onClick silently
+        // ignores the rest. Without aria-disabled a screen-reader user
+        // hears "option, not selected", activates it, and gets nothing
+        // announced back — repeatedly, down a 950-row volume.
+        aria-disabled={selecting && !downloaded}
+        // The title is folded in because aria-label REPLACES the
+        // element's accessible name: labelling the row "Select chapter
+        // 12" alone left a screen-reader user in selection mode with no
+        // chapter title at all — the one fact they need to decide what
+        // to delete.
         aria-label={
           selecting
-            ? tr("downloads.delete.selectChapter", { n: chapter.id })
+            ? tr("downloads.delete.selectChapter", {
+                n: chapter.id,
+                title: chapter.title,
+              })
             : undefined
         }
         style={{
@@ -2020,6 +2033,24 @@ function VolumesAccordion({
     setSelecting(false);
     setSelected(new Set());
   }, []);
+
+  // Escape leaves selection mode. The ✕ in the action bar was the only
+  // way out, and on Android the hardware back button routes into the
+  // webview's history — intercepting it would mean leaving the novel
+  // entirely, so a key is the honest fix here.
+  //
+  // Stands down while the confirm dialog or the volume menu is open:
+  // both bind Escape themselves, and cancelling a confirm should not
+  // also throw away the selection the user is about to retry with.
+  useEffect(() => {
+    if (!selecting) return;
+    if (deleteConfirm !== null || volumeMenu !== null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting, deleteConfirm, volumeMenu, exitSelection]);
 
   const toggleSelected = useCallback((chapterId: number) => {
     setSelected((prev) => {

@@ -375,7 +375,7 @@ export const ar: Messages = {
   "downloads.delete.selectionCount": "{n} محدد",
   "downloads.delete.selectAllDownloaded": "تحديد كل المنزَّل",
   "downloads.delete.exitSelection": "إنهاء التحديد",
-  "downloads.delete.selectChapter": "تحديد الفصل {n}",
+  "downloads.delete.selectChapter": "تحديد الفصل {n}: {title}",
   "downloads.delete.nothingRemoved": "لا يوجد تنزيل على القرص للفصل «{title}»",
   "downloads.delete.failed": "تعذّر الحذف: {error}",
   "downloads.delete.deleting": "جارٍ الحذف… {done} من {total}",
