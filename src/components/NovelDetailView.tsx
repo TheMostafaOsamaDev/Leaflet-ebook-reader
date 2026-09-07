@@ -72,6 +72,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useLongPress } from "../hooks/useLongPress";
 import { VolumeActionsMenu } from "./VolumeActionsMenu";
 import {
+  deleteChaptersWithQueue,
   downloadedChapterIds,
   readDownloadedChapterIds,
   type ChapterFlags,
@@ -1910,9 +1911,6 @@ function VolumesAccordion({
       const title = chapter?.title ?? String(chapterId);
       void (async () => {
         try {
-          const { deleteChaptersWithQueue } = await import(
-            "../store/chapterDeletion"
-          );
           const res = await deleteChaptersWithQueue(libraryEntryId, [
             chapterId,
           ]);
@@ -2119,9 +2117,6 @@ function VolumesAccordion({
       // otherwise show nothing at all until it finished.
       setDeleteProgress({ done: 0, total: ids.length });
       try {
-        const { deleteChaptersWithQueue } = await import(
-          "../store/chapterDeletion"
-        );
         const res = await deleteChaptersWithQueue(
           libraryEntryId,
           ids,
