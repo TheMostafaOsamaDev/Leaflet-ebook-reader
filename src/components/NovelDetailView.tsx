@@ -1633,7 +1633,7 @@ function ChapterDownloadButton({
         display: "flex",
         alignItems: "center",
         gap: 4,
-        color: showTrash || status === "error" ? "#b75050" : theme.muted,
+        color: showTrash || status === "error" ? theme.danger : theme.muted,
         opacity: downloaded && !showTrash ? 0.55 : 1,
         flexShrink: 0,
       }}
@@ -2204,9 +2204,14 @@ function VolumesAccordion({
               paddingBlock: 6,
               paddingInline: 12,
               borderRadius: 999,
-              border: "0.5px solid #b75050",
-              background: "#b75050",
-              color: "#fff",
+              border: `0.5px solid ${theme.danger}`,
+              background: theme.danger,
+              // theme.bg, not #fff: theme.danger is a LIGHT red on the
+              // dark themes (it has to clear AA against a near-black
+              // background), and white on it measures under 3:1. Taking
+              // the background as the label colour makes this ratio
+              // identical to danger-vs-bg, which the token guarantees.
+              color: theme.bg,
               cursor: selected.size === 0 ? "default" : "pointer",
               opacity: selected.size === 0 ? 0.45 : 1,
             }}

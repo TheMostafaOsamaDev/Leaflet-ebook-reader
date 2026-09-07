@@ -31,8 +31,6 @@ interface Props {
   onClose: () => void;
 }
 
-const DANGER = "#b75050";
-
 export function VolumeActionsMenu({
   theme, layout, open, anchor, title, subtitle, actions, onPick, onClose,
 }: Props) {
@@ -63,7 +61,7 @@ export function VolumeActionsMenu({
             textAlign: "start",
             cursor: a.disabled ? "default" : "pointer",
             opacity: a.disabled ? 0.42 : 1,
-            color: a.destructive ? DANGER : theme.ink,
+            color: a.destructive ? theme.danger : theme.ink,
           }}
           onMouseEnter={(e) => {
             if (!a.disabled) e.currentTarget.style.background = theme.hover;
