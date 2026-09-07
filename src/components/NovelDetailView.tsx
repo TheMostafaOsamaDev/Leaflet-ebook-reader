@@ -1963,8 +1963,12 @@ function VolumesAccordion({
   // trigger button's rect; `deleteConfirm` stages the chosen chapter ids
   // for the ConfirmDialog.
   const [volumeMenu, setVolumeMenu] = useState<
-    { id: number; x: number; y: number } | null
+    { id: number; left: number; right: number; y: number } | null
   >(null);
+  /** The ⋯ button that opened the menu. Handed to VolumeActionsMenu so
+   *  its outside-press listener can skip the trigger, letting the
+   *  trigger's own click toggle the menu shut. */
+  const volumeMenuTriggerRef = useRef<HTMLElement | null>(null);
   // Stable identity so VolumeActionsMenu's DesktopPopover effect (which
   // depends on onClose) doesn't tear down and re-add its window
   // listeners on every parent re-render (the download-queue subscription
@@ -2592,7 +2596,23 @@ function VolumesAccordion({
                   onClick={(e) => {
                     e.stopPropagation();
                     const r = e.currentTarget.getBoundingClientRect();
-                    setVolumeMenu({ id: v.id, x: r.left, y: r.bottom });
+                    volumeMenuTriggerRef.current = e.currentTarget;
+                    // Toggle, not open. DesktopPopover's outside-press
+                    // listener skips this button, so a second click
+                    // reaches here with the menu still open and closes
+                    // it; a click on another volume's ⋯ arrives after
+                    // that listener already closed the old one, so
+                    // `prev` is null and the new volume opens.
+                    setVolumeMenu((prev) =>
+                      prev?.id === v.id
+                        ? null
+                        : {
+                            id: v.id,
+                            left: r.left,
+                            right: r.right,
+                            y: r.bottom,
+                          },
+                    );
                   }}
                   title={tr("downloads.delete.volumeActions")}
                   aria-label={tr("downloads.delete.volumeActions")}
@@ -2720,7 +2740,16 @@ function VolumesAccordion({
             theme={theme}
             layout={layout}
             open={volumeMenu !== null}
-            anchor={volumeMenu ? { x: volumeMenu.x, y: volumeMenu.y } : null}
+            anchor={
+              volumeMenu
+                ? {
+                    left: volumeMenu.left,
+                    right: volumeMenu.right,
+                    y: volumeMenu.y,
+                  }
+                : null
+            }
+            triggerRef={volumeMenuTriggerRef}
             title={vol?.title ?? ""}
             // Not novel.chapterCountShort ("{n} ch."): a 200-chapter
             // volume with 12 downloads rendered "12 ch." under its own

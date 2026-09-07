@@ -5,10 +5,17 @@
 // Not ContextMenu: that one is shaped around a library book (cover,
 // author, reading status, edit/delete) and none of it applies here.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { MobileSheet } from "./MobileSheet";
 import { Icon } from "./Icon";
+import { useI18n } from "../i18n/useI18n";
 import { FONT_STACKS, type Theme } from "../styles/tokens";
+
+/** Rendered box width of the desktop popover: minWidth 250 + 5px
+ *  padding and a 0.5px border on each side. Used both to mirror the
+ *  menu under RTL and to keep it inside the viewport. */
+const MENU_BOX_WIDTH = 262;
+const VIEWPORT_MARGIN = 8;
 
 export interface VolumeAction {
   id: "download-all" | "delete-read" | "delete-all";
@@ -22,8 +29,14 @@ interface Props {
   theme: Theme;
   layout: "desktop" | "mobile";
   open: boolean;
-  /** Viewport coords of the trigger. Desktop only; ignored on mobile. */
-  anchor: { x: number; y: number } | null;
+  /** Viewport coords of the trigger. Desktop only; ignored on mobile.
+   *  Both horizontal edges, because which one the menu hangs from
+   *  depends on the UI direction — see DesktopPopover. */
+  anchor: { left: number; right: number; y: number } | null;
+  /** The button that opened this menu. The outside-press listener skips
+   *  presses landing inside it so the trigger's own click can toggle
+   *  the menu shut instead of closing and immediately reopening it. */
+  triggerRef?: RefObject<HTMLElement | null>;
   title: string;
   /** Mobile sheet header only — the desktop popover has no header.
    *  Rendered only when non-empty. */
@@ -38,8 +51,10 @@ interface Props {
 }
 
 export function VolumeActionsMenu({
-  theme, layout, open, anchor, title, subtitle, actions, note, onPick, onClose,
+  theme, layout, open, anchor, title, subtitle, actions, note, triggerRef,
+  onPick, onClose,
 }: Props) {
+  const { tr } = useI18n();
   const rows = (
     <div style={{ fontFamily: FONT_STACKS.sans }}>
       {actions.map((a) => (
@@ -109,7 +124,14 @@ export function VolumeActionsMenu({
         theme={theme}
         open={open}
         onClose={onClose}
-        label={title}
+        // A constant, not `title`. MobileSheet passes aria-label through
+        // live while freezing its children for the exit animation, and
+        // the caller derives `title` from `vol?.title ?? ""` — which
+        // empties the instant the menu is dismissed, leaving the
+        // role="dialog" nameless for the length of the exit. Fixed
+        // here rather than in MobileSheet so no other consumer's
+        // behaviour changes.
+        label={tr("downloads.delete.volumeActions")}
         // Sized to its content: a header plus three rows. The
         // percentage still bounds it on short phones.
         height="min(46%, 320px)"
@@ -128,19 +150,23 @@ export function VolumeActionsMenu({
   }
 
   return (
-    <DesktopPopover {...{ theme, open, anchor, onClose }}>{rows}</DesktopPopover>
+    <DesktopPopover {...{ theme, open, anchor, triggerRef, onClose }}>
+      {rows}
+    </DesktopPopover>
   );
 }
 
 function DesktopPopover({
-  theme, open, anchor, onClose, children,
+  theme, open, anchor, triggerRef, onClose, children,
 }: {
   theme: Theme;
   open: boolean;
-  anchor: { x: number; y: number } | null;
+  anchor: { left: number; right: number; y: number } | null;
+  triggerRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const { dir } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -148,7 +174,16 @@ function DesktopPopover({
       if (e.key === "Escape") onClose();
     };
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (ref.current && ref.current.contains(target)) return;
+      // The trigger opens on click but this listener fires on
+      // mousedown, so without this the sequence on the open menu's own
+      // ⋯ was close-then-reopen and it never toggled shut. Skipping the
+      // trigger lets its click handler own the toggle — and a press on
+      // a DIFFERENT volume's ⋯ still falls through and closes, so that
+      // one switches in a single click.
+      if (triggerRef?.current && triggerRef.current.contains(target)) return;
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousedown", onDown);
@@ -156,7 +191,7 @@ function DesktopPopover({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDown);
     };
-  }, [open, onClose]);
+  }, [open, onClose, triggerRef]);
 
   if (!open || !anchor) return null;
   return (
@@ -170,7 +205,21 @@ function DesktopPopover({
         // browser window (below the packaged app's 720x540 minimum, this
         // is otherwise unreachable).
         top: Math.max(8, Math.min(anchor.y + 6, window.innerHeight - 190)),
-        left: Math.max(8, Math.min(anchor.x, window.innerWidth - 270)),
+        // Physical `left`, deliberately: `anchor` holds physical
+        // viewport coordinates and this element is position: fixed, so
+        // insetInlineStart would resolve against the direction and land
+        // the menu on the wrong side. What IS direction-aware is which
+        // trigger edge the menu hangs from — the ⋯ sits at the inline
+        // end, so under RTL that is the trigger's right edge with the
+        // menu extending leftward. Anchoring off `left` in both
+        // directions opened the menu away from its own trigger.
+        left: Math.max(
+          VIEWPORT_MARGIN,
+          Math.min(
+            dir === "rtl" ? anchor.right - MENU_BOX_WIDTH : anchor.left,
+            window.innerWidth - MENU_BOX_WIDTH - VIEWPORT_MARGIN,
+          ),
+        ),
         zIndex: 9800,
         minWidth: 250,
         padding: 5,
