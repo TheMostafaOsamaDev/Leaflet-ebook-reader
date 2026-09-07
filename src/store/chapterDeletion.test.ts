@@ -86,6 +86,41 @@ describe("deleteChaptersWithQueue", () => {
     expect(res.removed.slice().sort()).toEqual([1, 2]);
   });
 
+  it("de-duplicates the ids before it touches disk", async () => {
+    // Every delete affordance funnels through here, so this is the one
+    // place a caller passing the same chapter twice can be caught. A
+    // duplicate would double-call remove() and inflate onProgress'
+    // total.
+    await deleteChaptersWithQueue("e1", [1, 1, 2]);
+    expect(deleteCalls[0]).toEqual([1, 2]);
+  });
+
+  it("re-sweeps a mid-flight chapter even when its flag stayed clear", async () => {
+    wasRunning = [2];
+    resurrect = [];
+    await deleteChaptersWithQueue("e1", [1, 2]);
+    // The state this guards is invisible in the snapshot: a worker
+    // inside writeChapterContent when remove(dir) landed writes its
+    // images before content.json, so it recreates files in the
+    // just-removed directory and then throws before
+    // markChapterDownloaded. Files on disk, flag clear — the row reads
+    // "not downloaded" and nothing would ever reclaim that space. So
+    // the second sweep can't be conditional on the flag coming back.
+    expect(deleteCalls).toHaveLength(2);
+    expect(deleteCalls[1]).toEqual([2]);
+  });
+
+  it("re-sweeps a resurrected id that was not itself mid-flight", async () => {
+    // The flag check spans every id we deleted, not just the ones the
+    // queue reported as running, so a late write we didn't predict is
+    // still caught.
+    wasRunning = [2];
+    resurrect = [1];
+    await deleteChaptersWithQueue("e1", [1, 2]);
+    expect(deleteCalls).toHaveLength(2);
+    expect(deleteCalls[1].slice().sort()).toEqual([1, 2]);
+  });
+
   it("does not sweep twice when nothing was running", async () => {
     wasRunning = [];
     await deleteChaptersWithQueue("e1", [1, 2]);

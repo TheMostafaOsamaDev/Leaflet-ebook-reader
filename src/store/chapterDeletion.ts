@@ -53,33 +53,45 @@ export async function deleteChaptersWithQueue(
     onProgress,
   );
 
-  // 4. Re-check. A worker that resolved during the sweep may have
-  //    re-flipped downloadedAt; sweeping those ids again is cheap and
-  //    idempotent, and it is the difference between a delete that
-  //    holds and one that quietly reverts.
+  // 4. Re-check. Two different resurrections need catching here, and
+  //    only one of them is visible in the snapshot.
   //
-  //    This MUST be a fresh read from disk, not `first.snapshot`:
-  //    deleteChapterDownloads strips downloadedAt for every id it was
-  //    just asked to delete before returning that same snapshot, so
-  //    `first.snapshot` is guaranteed to already show the flag clear
-  //    for all of `ids` — checking it can never find a resurrection.
+  //    (a) Files on disk with the flag already clear — the state that
+  //        actually occurs. A worker sitting inside writeChapterContent
+  //        when our remove(dir) lands writes its images BEFORE
+  //        content.json, so it recreates files inside the directory we
+  //        just removed. Its next progress poll then throws
+  //        CancelledError and markChapterDownloaded never runs: files
+  //        on disk, flag clear. The row reads "not downloaded", so the
+  //        user has no reason to delete it again and nothing will ever
+  //        reclaim that space — in a feature whose entire purpose is
+  //        reclaiming space. Nothing in the snapshot reveals this, so
+  //        every id that was mid-flight is swept again unconditionally.
+  //        That set is bounded by the queue's concurrency (<= 5), so it
+  //        is at most five extra remove() calls.
+  //
+  //    (b) The flag itself flipped back on — a worker that got all the
+  //        way through markChapterDownloaded during the sweep. This one
+  //        MUST be read fresh from disk, not from `first.snapshot`:
+  //        deleteChapterDownloads strips downloadedAt for every id it
+  //        was just asked to delete before returning that same
+  //        snapshot, so `first.snapshot` always shows the flag clear
+  //        for all of `ids` and checking it could never find a
+  //        resurrection. Checked across every id we deleted rather than
+  //        only the mid-flight ones, so a late write we did not predict
+  //        is still caught.
   let removed = first.removed;
   if (wasRunning.length > 0) {
+    const wanted = new Set(ids);
+    const resweep = new Set(wasRunning);
     const freshSnap = await readSnapshot(libraryEntryId);
-    const stillDownloaded = new Set<number>();
     for (const v of freshSnap?.volumes ?? []) {
       for (const c of v.chapters) {
-        if (wasRunning.includes(c.id) && c.downloadedAt) {
-          stillDownloaded.add(c.id);
-        }
+        if (c.downloadedAt && wanted.has(c.id)) resweep.add(c.id);
       }
     }
-    if (stillDownloaded.size > 0) {
-      const second = await deleteChapterDownloads(libraryEntryId, [
-        ...stillDownloaded,
-      ]);
-      removed = [...new Set([...removed, ...second.removed])];
-    }
+    const second = await deleteChapterDownloads(libraryEntryId, [...resweep]);
+    removed = [...new Set([...removed, ...second.removed])];
   }
 
   return { removed, cancelledRunning: wasRunning };
