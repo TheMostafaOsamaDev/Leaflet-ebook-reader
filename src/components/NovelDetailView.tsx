@@ -1480,13 +1480,6 @@ const ChapterRow = memo(function ChapterRow({
           {chapter.id}
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>{chapter.title}</span>
-        {read && (
-          <Icon
-            name="check"
-            size={13}
-            style={{ color: ACCENT, flexShrink: 0, alignSelf: "center" }}
-          />
-        )}
       </button>
       {libraryEntryId && !selecting && (
         <ChapterDownloadButton
@@ -1605,17 +1598,21 @@ function ChapterDownloadButton({
           ? "error"
           : "idle";
 
+  // "downloaded" is an SD card, not a tick: a tick reads as "done", and this
+  // row's point is that the content lives on THIS DEVICE — which is also why
+  // the resting glyph doubles as the delete button. "idle" is the enclosed
+  // download arrow, so the pair reads as one state and its opposite.
   const iconName = showTrash
     ? "trash"
     : status === "downloaded"
-      ? "check"
+      ? "sdCard"
       : status === "queued"
         ? "clock"
         : status === "running"
-          ? "cloudOk"
+          ? "chevronsD"
           : status === "error"
-            ? "info"
-            : "download";
+            ? "xCirc"
+            : "downloadCirc";
 
   // The downloaded label is now the delete label — an icon-only button
   // whose aria-label still said "Downloaded" would announce the wrong
