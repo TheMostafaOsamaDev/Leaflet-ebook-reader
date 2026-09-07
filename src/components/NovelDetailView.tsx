@@ -38,11 +38,6 @@ import { MeasuredVirtualList } from "./VirtualList";
 import type { SourceSnapshot } from "../store/sourceLibrary";
 import { transition } from "../styles/motion";
 
-interface ChapterFlags {
-  downloadedAt?: number;
-  readAt?: number;
-}
-
 /** Build a chapter-id → {downloadedAt, readAt} lookup from a snapshot.
  *  Lets the volumes accordion render per-chapter status with a single
  *  Map.get() per chapter instead of walking volumes each time. */
@@ -79,6 +74,7 @@ import { VolumeActionsMenu } from "./VolumeActionsMenu";
 import {
   downloadedChapterIds,
   readDownloadedChapterIds,
+  type ChapterFlags,
 } from "../store/chapterDeletion";
 
 /** Debounce window for the in-novel chapter search. Same rationale as
