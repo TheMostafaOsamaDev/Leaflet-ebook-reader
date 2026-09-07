@@ -413,6 +413,36 @@ export const en = {
   "downloads.range.nothingToDownload": "Nothing to download",
   "downloads.range.queueButton": "Queue {n}",
 
+  // deleting downloaded chapters
+  "downloads.delete.chapterLabel": "Delete download of chapter {n}",
+  "downloads.delete.deleted": "Deleted “{title}”",
+  "downloads.delete.deletedAndCancelled": "Cancelled and deleted “{title}”",
+  "downloads.delete.redownload": "Re-download",
+  "downloads.delete.volumeActions": "Volume actions",
+  "downloads.delete.deleteRead": "Delete read downloads",
+  "downloads.delete.deleteAllInVolume": "Delete all downloads in volume",
+  "downloads.delete.nothingToDelete": "No downloads to delete",
+  "downloads.delete.confirmTitleOne": "Delete 1 download?",
+  "downloads.delete.confirmTitleOther": "Delete {n} downloads?",
+  "downloads.delete.confirmBody":
+    "These chapters stay in the list and can be read online or downloaded again. Your reading progress is kept.",
+  "downloads.delete.confirmButtonOne": "Delete 1",
+  "downloads.delete.confirmButtonOther": "Delete {n}",
+  "downloads.delete.deletedCountOne": "Deleted 1 download",
+  "downloads.delete.deletedCountOther": "Deleted {n} downloads",
+  "downloads.delete.selectionCount": "{n} selected",
+  "downloads.delete.selectAllDownloaded": "Select all downloaded",
+  "downloads.delete.exitSelection": "Exit selection",
+  "downloads.delete.selectChapter": "Select chapter {n}: {title}",
+  "downloads.delete.downloadedCount": "{n} downloaded",
+  "downloads.delete.volumeNotLoaded":
+    "Expand this volume to manage its downloads.",
+  "downloads.delete.nothingRemoved": "No download on disk for “{title}”",
+  "downloads.delete.failed": "Couldn't delete: {error}",
+  "downloads.delete.deleting": "Deleting… {done} of {total}",
+  "downloads.delete.conversionRunning":
+    "A “Save as offline book” job is running for this novel. It will refetch every deleted chapter from the source instead of reading it from disk, which is much slower.",
+
   // save-as-offline-book dialog
   "downloads.saveOffline.title": "Save as offline book",
   "downloads.saveOffline.loading": "Loading volume listing…",

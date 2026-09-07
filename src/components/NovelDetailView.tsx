@@ -38,11 +38,6 @@ import { MeasuredVirtualList } from "./VirtualList";
 import type { SourceSnapshot } from "../store/sourceLibrary";
 import { transition } from "../styles/motion";
 
-interface ChapterFlags {
-  downloadedAt?: number;
-  readAt?: number;
-}
-
 /** Build a chapter-id → {downloadedAt, readAt} lookup from a snapshot.
  *  Lets the volumes accordion render per-chapter status with a single
  *  Map.get() per chapter instead of walking volumes each time. */
@@ -72,6 +67,16 @@ import { AnimatedDialog } from "./AnimatedDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ShelfChecklist } from "./ShelfChecklist";
 import type { Shelf } from "../store/shelves";
+import { Toast, type ToastMessage } from "./Toast";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useLongPress } from "../hooks/useLongPress";
+import { VolumeActionsMenu } from "./VolumeActionsMenu";
+import {
+  deleteChaptersWithQueue,
+  downloadedChapterIds,
+  readDownloadedChapterIds,
+  type ChapterFlags,
+} from "../store/chapterDeletion";
 
 /** Debounce window for the in-novel chapter search. Same rationale as
  *  the homepage suggest debounce — fast enough to feel live, slow enough
@@ -1269,8 +1274,13 @@ function VolumeErrorPanel({ theme, message, onRetry }: VolumeErrorPanelProps) {
 // clicks. Filled in by task 10 once the queue module exists.
 
 /** Resting height of a one-line chapter row. Only a seed for the windowed
- *  list's offset table — rows that wrap get measured and corrected. */
-const CHAPTER_ROW_HEIGHT = 36;
+ *  list's offset table — rows that wrap get measured and corrected.
+ *
+ *  44px, not the old 36: the row now carries a delete action beside the
+ *  download one, and 36 put both under the 44px touch minimum. This
+ *  feeds MeasuredVirtualList's estimatedItemHeight — leaving it stale
+ *  makes the list mis-estimate its scroll extent on a 950-row volume. */
+const CHAPTER_ROW_HEIGHT = 44;
 
 interface ChapterRowProps {
   theme: Theme;
@@ -1282,7 +1292,21 @@ interface ChapterRowProps {
   novelTitle: string;
   queueJob: DownloadJob | undefined;
   onOpenChapter: (chapterId: number) => void;
-  onFlagsChanged: () => void;
+  /** Asks the accordion to delete this row's download. A request, not a
+   *  notification: the accordion owns deleteChaptersWithQueue, the flag
+   *  refresh and every toast this can produce — including the error one
+   *  a failed snapshot write needs, which a row has no channel for. */
+  onRequestDelete: (chapterId: number) => void;
+  /** True once the accordion is in selection mode (any row long-pressed
+   *  or right-clicked). Swaps the row's click behaviour from "open
+   *  chapter" to "toggle selection" and reveals the checkbox. */
+  selecting: boolean;
+  /** Whether THIS row is in the parent's selected set. A boolean, not
+   *  the Set itself, so only the rows whose selectedness actually
+   *  changed re-render under `memo`. */
+  selected: boolean;
+  onToggleSelect: (chapterId: number) => void;
+  onEnterSelection: (chapterId: number) => void;
 }
 
 /**
@@ -1305,25 +1329,96 @@ const ChapterRow = memo(function ChapterRow({
   novelTitle,
   queueJob,
   onOpenChapter,
-  onFlagsChanged,
+  onRequestDelete,
+  selecting,
+  selected,
+  onToggleSelect,
+  onEnterSelection,
 }: ChapterRowProps) {
+  const { tr } = useI18n();
+  // Long-press / right-click entry point, shared by the pointer-based
+  // long-press below and the onContextMenu handler.
+  //
+  // Only downloaded chapters are selectable — selection exists in order
+  // to delete, so a row with nothing to delete in the set would need a
+  // disabled state in the action bar. This guard used to live in the
+  // parent's `enterSelection`, keyed off `chapterFlags`, but that gave
+  // every row's `onEnterSelection` prop a new identity whenever flags
+  // were rebuilt, defeating the memo for every mounted row at once.
+  // `downloaded` is already a stable per-row boolean prop, so the guard
+  // belongs here instead.
+  //
+  // While already selecting, a long-press or right-click toggles the
+  // row like a tap does rather than resetting the whole selection to
+  // just this one chapter — otherwise a stray long-press mid-multi-select
+  // would silently collapse a large selection down to one row.
+  const activateForSelection = () => {
+    if (!downloaded) return;
+    if (selecting) onToggleSelect(chapter.id);
+    else onEnterSelection(chapter.id);
+  };
+  // ignoreMouse: this list's primary action is "open the chapter", and a
+  // deliberate slow left-click held past 500ms was entering selection
+  // mode instead. Desktop keeps the right-click entry below, which is
+  // unambiguous. An intentional, approved deviation from the design
+  // spec's "long-press or right-click" wording.
+  const { bind, consumeLongPress } = useLongPress(activateForSelection, {
+    ignoreMouse: true,
+  });
   return (
     <div
-      role="listitem"
+      role={selecting ? undefined : "listitem"}
       style={{ display: "flex", alignItems: "stretch", direction }}
     >
       <button
-        onClick={() => onOpenChapter(chapter.id)}
+        {...bind}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          activateForSelection();
+        }}
+        onClick={() => {
+          if (consumeLongPress()) return;
+          if (selecting) {
+            if (downloaded) onToggleSelect(chapter.id);
+            return;
+          }
+          onOpenChapter(chapter.id);
+        }}
+        role={selecting ? "option" : undefined}
+        aria-selected={selecting ? selected : undefined}
+        // Only downloaded rows are selectable, and onClick silently
+        // ignores the rest. Without aria-disabled a screen-reader user
+        // hears "option, not selected", activates it, and gets nothing
+        // announced back — repeatedly, down a 950-row volume.
+        aria-disabled={selecting && !downloaded}
+        // The title is folded in because aria-label REPLACES the
+        // element's accessible name: labelling the row "Select chapter
+        // 12" alone left a screen-reader user in selection mode with no
+        // chapter title at all — the one fact they need to decide what
+        // to delete.
+        aria-label={
+          selecting
+            ? tr("downloads.delete.selectChapter", {
+                n: chapter.id,
+                title: chapter.title,
+              })
+            : undefined
+        }
         style={{
           flex: 1,
           textAlign: "start",
-          background: "transparent",
+          background: selected
+            ? `color-mix(in srgb, ${ACCENT} 10%, transparent)`
+            : "transparent",
           border: "none",
           // Start-edge accent bar — transparent by default, theme.rule when
-          // read, ACCENT on hover. A fixed 2px logical border (never toggled
-          // to 0) so the colour change never shifts the row's layout.
-          borderInlineStart: `2px solid ${read ? theme.rule : "transparent"}`,
-          paddingBlock: 9,
+          // read, ACCENT on hover or when selected. A fixed 2px logical
+          // border (never toggled to 0) so the colour change never shifts
+          // the row's layout.
+          borderInlineStart: `2px solid ${
+            selected ? ACCENT : read ? theme.rule : "transparent"
+          }`,
+          paddingBlock: 13,
           paddingInlineStart: 26,
           paddingInlineEnd: 14,
           // Dim read chapters so the list reads "checked off" without hiding
@@ -1341,16 +1436,38 @@ const ChapterRow = memo(function ChapterRow({
           transition: transition("border-color", "fast", "out"),
         }}
         onMouseEnter={(e) => {
+          if (selected) return;
           e.currentTarget.style.background = theme.hover;
           e.currentTarget.style.borderInlineStartColor = ACCENT;
         }}
         onMouseLeave={(e) => {
+          if (selected) return;
           e.currentTarget.style.background = "transparent";
           e.currentTarget.style.borderInlineStartColor = read
             ? theme.rule
             : "transparent";
         }}
       >
+        {selecting && (
+          <span
+            aria-hidden
+            style={{
+              width: 17,
+              height: 17,
+              borderRadius: 5,
+              flexShrink: 0,
+              display: "grid",
+              placeItems: "center",
+              border: `1.5px solid ${selected ? ACCENT : theme.ruleStrong}`,
+              background: selected ? ACCENT : "transparent",
+              color: "#fff",
+              opacity: downloaded ? 1 : 0.3,
+              transition: transition("background-color", "fast", "out"),
+            }}
+          >
+            {selected && <Icon name="check" size={11} />}
+          </span>
+        )}
         <span
           style={{
             fontSize: 11,
@@ -1363,15 +1480,8 @@ const ChapterRow = memo(function ChapterRow({
           {chapter.id}
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>{chapter.title}</span>
-        {read && (
-          <Icon
-            name="check"
-            size={13}
-            style={{ color: ACCENT, flexShrink: 0, alignSelf: "center" }}
-          />
-        )}
       </button>
-      {libraryEntryId && (
+      {libraryEntryId && !selecting && (
         <ChapterDownloadButton
           theme={theme}
           libraryEntryId={libraryEntryId}
@@ -1380,7 +1490,7 @@ const ChapterRow = memo(function ChapterRow({
           novelTitle={novelTitle}
           chapterTitle={chapter.title}
           queueJob={queueJob}
-          onChange={onFlagsChanged}
+          onRequestDelete={onRequestDelete}
         />
       )}
     </div>
@@ -1393,12 +1503,13 @@ interface ChapterDownloadButtonProps {
   chapterId: number;
   /** True when the chapter has been downloaded to disk according to
    *  the parent's flag map. The button uses this for the resting state
-   *  ("downloaded" check icon) and as a guard against re-enqueuing. */
+   *  ("downloaded" check icon, armed into a delete action) and as a
+   *  guard against re-enqueuing. */
   downloaded: boolean;
-  /** Called after any state change that should refresh the parent's
-   *  flag map (download success, manual delete). The parent re-reads
-   *  source.json and rebuilds its chapter-flag lookup. */
-  onChange: () => void;
+  /** Asks the accordion to delete this chapter's download. See
+   *  ChapterRowProps.onRequestDelete for why the button doesn't run the
+   *  delete itself. */
+  onRequestDelete: (chapterId: number) => void;
 }
 
 function ChapterDownloadButton({
@@ -1409,7 +1520,7 @@ function ChapterDownloadButton({
   novelTitle,
   chapterTitle,
   queueJob,
-  onChange,
+  onRequestDelete,
 }: ChapterDownloadButtonProps & {
   novelTitle: string;
   chapterTitle: string;
@@ -1420,23 +1531,29 @@ function ChapterDownloadButton({
   queueJob: import("../store/downloadQueue").DownloadJob | undefined;
 }) {
   const { tr } = useI18n();
+
   const onClick = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (downloaded) return;
+      if (downloaded) {
+        // Single deletes skip the dialog: a deleted chapter is always
+        // re-downloadable from the source, so the toast's action is a
+        // cheaper undo than a modal. Bulk deletes still confirm.
+        //
+        // The delete runs in the accordion rather than here. It has to:
+        // deleteChapterDownloads ends in a writeTextFile that throws on
+        // a full disk — exactly the state a user deleting downloads is
+        // in — and the toast that has to report that lives up there.
+        onRequestDelete(chapterId);
+        return;
+      }
       if (queueJob) {
-        // Already queued — clicking again cancels.
         const { cancel } = await import("../store/downloadQueue");
         cancel(queueJob.id);
         return;
       }
       const { enqueue } = await import("../store/downloadQueue");
-      enqueue({
-        libraryEntryId,
-        chapterId,
-        novelTitle,
-        chapterTitle,
-      });
+      enqueue({ libraryEntryId, chapterId, novelTitle, chapterTitle });
     },
     [
       libraryEntryId,
@@ -1445,11 +1562,28 @@ function ChapterDownloadButton({
       queueJob,
       novelTitle,
       chapterTitle,
+      onRequestDelete,
     ],
   );
 
+  // The touch-detection idiom used elsewhere in this codebase
+  // (ContextMenu.tsx): `(hover: none)` alone misses Android Chrome
+  // configs that report `hover: hover`, so OR with `(pointer: coarse)`
+  // and fall back to navigator.maxTouchPoints.
+  const mqTouch = useMediaQuery("(hover: none), (pointer: coarse)");
+  const isTouch =
+    mqTouch ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+
+  // The downloaded row's icon is a ✓ at rest and a trash on hover or
+  // keyboard focus. The button stays in the DOM and focusable at all
+  // times — a hover-only control would be unreachable by keyboard —
+  // and touch (no hover) shows the trash permanently.
+  const [armed, setArmed] = useState(false);
+  const showTrash = downloaded && (armed || isTouch);
+
   // Resting state precedence:
-  //   downloaded (persisted)  → check icon, dim
+  //   downloaded (persisted)  → check icon, dim (trash armed on hover/focus/touch)
   //   queued                  → clock icon
   //   running                 → spinning download icon + progress %
   //   error (recent)          → info icon, warning color
@@ -1463,9 +1597,29 @@ function ChapterDownloadButton({
         : queueJob?.status === "error"
           ? "error"
           : "idle";
+
+  // "downloaded" is an SD card, not a tick: a tick reads as "done", and this
+  // row's point is that the content lives on THIS DEVICE — which is also why
+  // the resting glyph doubles as the delete button. "idle" is the enclosed
+  // download arrow, so the pair reads as one state and its opposite.
+  const iconName = showTrash
+    ? "trash"
+    : status === "downloaded"
+      ? "sdCard"
+      : status === "queued"
+        ? "clock"
+        : status === "running"
+          ? "chevronsD"
+          : status === "error"
+            ? "xCirc"
+            : "downloadCirc";
+
+  // The downloaded label is now the delete label — an icon-only button
+  // whose aria-label still said "Downloaded" would announce the wrong
+  // action to a screen reader.
   const label =
     status === "downloaded"
-      ? tr("downloads.statusDownloaded")
+      ? tr("downloads.delete.chapterLabel", { n: chapterId })
       : status === "queued"
         ? tr("novel.queuedClickCancel")
         : status === "running"
@@ -1482,50 +1636,24 @@ function ChapterDownloadButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      disabled={status === "downloaded"}
-      // Refresh the parent's flag lookup once a download lands. The
-      // parent's onChange does a snapshot re-read; running here on
-      // every render with a useEffect would be wasteful. Instead, the
-      // parent subscribes to the queue and pings onChange when a job
-      // turns terminal.
-      onMouseLeave={() => {
-        // no-op; included for completeness — the useEffect above
-        // could also trigger onChange when status flips, but the
-        // parent re-renders on queue state anyway.
-        void onChange;
-      }}
+      onMouseEnter={() => setArmed(true)}
+      onMouseLeave={() => setArmed(false)}
+      onFocus={() => setArmed(true)}
+      onBlur={() => setArmed(false)}
       style={{
         background: "transparent",
         border: "none",
-        cursor:
-          status === "downloaded"
-            ? "default"
-            : status === "queued" || status === "running"
-              ? "pointer"
-              : "pointer",
+        cursor: "pointer",
         padding: "0 14px",
         display: "flex",
         alignItems: "center",
         gap: 4,
-        color: status === "error" ? "#b75050" : theme.muted,
-        opacity: status === "downloaded" ? 0.55 : 1,
+        color: showTrash || status === "error" ? theme.danger : theme.muted,
+        opacity: downloaded && !showTrash ? 0.55 : 1,
         flexShrink: 0,
       }}
     >
-      <Icon
-        name={
-          status === "downloaded"
-            ? "check"
-            : status === "queued"
-              ? "clock"
-              : status === "running"
-                ? "cloudOk"
-                : status === "error"
-                  ? "info"
-                  : "download"
-        }
-        size={14}
-      />
+      <Icon name={iconName} size={14} />
       {status === "running" && (
         <span style={{ fontSize: 10, color: theme.muted }}>
           {Math.round((queueJob?.progress ?? 0) * 100)}%
@@ -1716,13 +1844,311 @@ function VolumesAccordion({
   // Refresh chapter flags on demand — used by the per-chapter download
   // button once a download completes. Reads source.json and rebuilds
   // the flag map.
+  //
+  // Generation-guarded, because these overlap and don't resolve in
+  // order. Cancelling a QUEUED job inside cancelJobsForChapters calls
+  // setStatus(…, "cancelled") synchronously, which emits, which makes
+  // the queue subscription below see a new terminal job and fire its
+  // own refreshFlags — so a read of the PRE-delete snapshot is already
+  // in flight before the sweep starts, and runBulkDelete fires another
+  // one when it finishes. If the first read lands last (a multi-MB
+  // source.json on Android competing with 200 in-flight remove()
+  // calls) the deleted chapters flip back to "downloaded" until the
+  // next queue tick or navigation, and the delete looks like it
+  // failed. Only the newest read may write.
+  const flagsGenRef = useRef(0);
   const refreshFlags = useCallback(async () => {
     if (!libraryEntryId) return;
+    const gen = ++flagsGenRef.current;
     const { readSnapshot } = await import("../store/sourceLibrary");
     const snap = await readSnapshot(libraryEntryId);
     if (!snap) return;
+    if (gen !== flagsGenRef.current) return;
     onChapterFlagsChange(buildFlagMap(snap));
   }, [libraryEntryId, onChapterFlagsChange]);
+
+  // Toast + per-row delete plumbing. Reused by the bulk delete affordances
+  // (volume / read-downloads) landing in later tasks.
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const toastIdRef = useRef(0);
+  const showToast = useCallback(
+    (
+      kind: ToastMessage["kind"],
+      text: string,
+      action?: ToastMessage["action"],
+    ) => {
+      toastIdRef.current += 1;
+      setToast({ id: toastIdRef.current, kind, text, action });
+    },
+    [],
+  );
+  // Stable, like closeVolumeMenu above and for the same reason. Toast's
+  // auto-dismiss effect lists onDismiss in its deps, so an inline arrow
+  // restarted the 3.5s timer on every parent re-render — and this
+  // component re-renders on every queue emission, roughly 25 per
+  // chapter (one per image). Deleting chapter 5 while chapter 7
+  // downloaded pinned the toast, and its stale "Re-download chapter 5"
+  // button, for the whole remaining download.
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  /** One row's delete, end to end: run it, refresh the flags, report
+   *  what actually happened.
+   *
+   *  Every exit reports something. deleteChapterDownloads ends in a
+   *  writeTextFile, which throws when the disk is full — the state a
+   *  user deleting downloads is most likely to be in. Left uncaught
+   *  that was an unhandled rejection with no toast, no error, and a row
+   *  still showing a ✓ over content that is already gone. */
+  const deleteOneChapter = useCallback(
+    (chapterId: number) => {
+      if (!libraryEntryId) return;
+      const chapter = novel.volumes
+        .flatMap((v) => v.chapters)
+        .find((c) => c.id === chapterId);
+      const title = chapter?.title ?? String(chapterId);
+      void (async () => {
+        try {
+          const res = await deleteChaptersWithQueue(libraryEntryId, [
+            chapterId,
+          ]);
+          // res.removed is what the snapshot actually cleared. Saying
+          // "Deleted X" regardless of it means a chapter the snapshot
+          // never listed reads as freed disk that was never freed.
+          if (res.removed.length === 0) {
+            showToast("warn", tr("downloads.delete.nothingRemoved", { title }));
+            return;
+          }
+          showToast(
+            "info",
+            tr(
+              res.cancelledRunning.length > 0
+                ? "downloads.delete.deletedAndCancelled"
+                : "downloads.delete.deleted",
+              { title },
+            ),
+            {
+              label: tr("downloads.delete.redownload"),
+              onClick: () => {
+                void (async () => {
+                  const { enqueue } = await import("../store/downloadQueue");
+                  if (!chapter) return;
+                  enqueue({
+                    libraryEntryId,
+                    chapterId,
+                    novelTitle: novel.title,
+                    chapterTitle: chapter.title,
+                  });
+                })();
+              },
+            },
+          );
+        } catch (e) {
+          showToast(
+            "error",
+            tr("downloads.delete.failed", {
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          );
+        } finally {
+          // Either way: a throw can land after some directories were
+          // already swept, so the rows have to be rebuilt from disk
+          // rather than left on the pre-delete map.
+          void refreshFlags();
+        }
+      })();
+    },
+    [refreshFlags, showToast, tr, novel, libraryEntryId],
+  );
+
+  // Volume-header overflow menu ("⋯"): delete read downloads / delete all
+  // downloads in the volume. `volumeMenu` anchors the popover/sheet at the
+  // trigger button's rect; `deleteConfirm` stages the chosen chapter ids
+  // for the ConfirmDialog.
+  const [volumeMenu, setVolumeMenu] = useState<
+    { id: number; left: number; right: number; y: number } | null
+  >(null);
+  /** The ⋯ button that opened the menu. Handed to VolumeActionsMenu so
+   *  its outside-press listener can skip the trigger, letting the
+   *  trigger's own click toggle the menu shut. */
+  const volumeMenuTriggerRef = useRef<HTMLElement | null>(null);
+  // Stable identity so VolumeActionsMenu's DesktopPopover effect (which
+  // depends on onClose) doesn't tear down and re-add its window
+  // listeners on every parent re-render (the download-queue subscription
+  // above re-renders this component frequently while the popover is open).
+  const closeVolumeMenu = useCallback(() => setVolumeMenu(null), []);
+  /** Chapters staged for a bulk delete, awaiting the user's confirm.
+   *  `conversionActive` is sampled once at stage time — see stageDelete. */
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    ids: number[];
+    conversionActive: boolean;
+  } | null>(null);
+  /** Stage a bulk delete for confirmation, sampling the queue for a
+   *  live conversion of this same entry on the way.
+   *
+   *  The design spec's hazard 5: storeConversion's enrichChapter reads
+   *  a chapter from disk when downloadedAt is set and refetches it from
+   *  the source otherwise. Deleting under a running "Save as offline
+   *  book" therefore doesn't fail — it silently turns a fast local job
+   *  into hundreds of live scrapes, which is minutes-to-hours of
+   *  degradation plus real rate-limit exposure. So it warns, and does
+   *  NOT block: the user may well mean it.
+   *
+   *  Sampled here rather than read during render because the queue
+   *  module is loaded lazily throughout this file, and the confirm's
+   *  body has to be a plain synchronous render. A conversion starting
+   *  in the second between staging and confirming goes unwarned; that
+   *  is the honest cost of not making the dialog async. */
+  const stageDelete = useCallback(
+    (ids: number[]) => {
+      if (ids.length === 0) return;
+      void (async () => {
+        let conversionActive = false;
+        if (libraryEntryId) {
+          try {
+            const { getState } = await import("../store/downloadQueue");
+            conversionActive = getState().jobs.some(
+              (j) =>
+                j.kind === "conversion" &&
+                j.libraryEntryId === libraryEntryId &&
+                (j.status === "queued" || j.status === "running"),
+            );
+          } catch {
+            // Queue module unavailable — stage without the warning
+            // rather than blocking a delete the user asked for.
+          }
+        }
+        setDeleteConfirm({ ids, conversionActive });
+      })();
+    },
+    [libraryEntryId],
+  );
+  /** Live counter for a bulk delete, driven by deleteChapterDownloads'
+   *  every-25-chapters onProgress. Non-null exactly while a sweep runs,
+   *  so it doubles as the "show the progress line" flag.
+   *
+   *  A 950-chapter volume is 950 sequential remove() IPC round-trips
+   *  with the entry lock held — minutes on Android. Without this the
+   *  only feedback was a toast at the very end. */
+  const [deleteProgress, setDeleteProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  /** Disables the bulk-delete affordances while a sweep is in flight.
+   *  The ref is the actual guard — two synchronous confirms would both
+   *  read a not-yet-committed `false` out of the state variable. The
+   *  state exists only so the buttons re-render disabled.
+   *
+   *  Without it: confirm "delete all in volume", reopen the ⋯ menu
+   *  (still computing `downloaded` from the pre-delete chapterFlags),
+   *  confirm the same 950 ids again. The second call serializes behind
+   *  the entry lock, finds every flag already clear, and reports
+   *  "Deleted 0 downloads" after 950 more remove() calls. */
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
+
+  // Selection state is declared here, ahead of runBulkDelete: runBulkDelete
+  // calls exitSelection at the end, and a `const` arrow declared below it
+  // would be a used-before-declaration error. Library.tsx hoists showToast
+  // for the same reason.
+  //
+  // Selection lives in the parent, not in the rows: `ChapterRow` is
+  // memoized because the parent re-renders on every download-queue tick,
+  // and a 950-row volume can't afford to reconcile all of them. Rows
+  // receive a boolean, so only the two rows whose selectedness actually
+  // changed re-render.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const exitSelection = useCallback(() => {
+    setSelecting(false);
+    setSelected(new Set());
+  }, []);
+
+  // Escape leaves selection mode. The ✕ in the action bar was the only
+  // way out, and on Android the hardware back button routes into the
+  // webview's history — intercepting it would mean leaving the novel
+  // entirely, so a key is the honest fix here.
+  //
+  // Stands down while the confirm dialog or the volume menu is open:
+  // both bind Escape themselves, and cancelling a confirm should not
+  // also throw away the selection the user is about to retry with.
+  useEffect(() => {
+    if (!selecting) return;
+    if (deleteConfirm !== null || volumeMenu !== null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting, deleteConfirm, volumeMenu, exitSelection]);
+
+  const toggleSelected = useCallback((chapterId: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(chapterId)) next.delete(chapterId);
+      else next.add(chapterId);
+      return next;
+    });
+  }, []);
+
+  // The "only downloaded chapters are selectable" guard used to live
+  // here and depend on `chapterFlags`, which made this callback (and
+  // therefore every mounted ChapterRow's `onEnterSelection` prop) get a
+  // new identity on every flag rebuild — defeating the row memo for all
+  // of them, not just the row whose flags actually changed. ChapterRow
+  // already receives `downloaded` as a boolean prop, so the guard now
+  // lives there instead, letting this stay a stable, dependency-free
+  // callback.
+  const enterSelection = useCallback((chapterId: number) => {
+    setSelecting(true);
+    setSelected(new Set([chapterId]));
+  }, []);
+
+  const runBulkDelete = useCallback(
+    async (ids: number[]) => {
+      if (!libraryEntryId || ids.length === 0) return;
+      if (deletingRef.current) return;
+      deletingRef.current = true;
+      setDeleting(true);
+      // Seed at 0/total so the line appears the moment the sweep starts.
+      // onProgress only fires every 25 chapters, so a small batch would
+      // otherwise show nothing at all until it finished.
+      setDeleteProgress({ done: 0, total: ids.length });
+      try {
+        const res = await deleteChaptersWithQueue(
+          libraryEntryId,
+          ids,
+          (done, total) => setDeleteProgress({ done, total }),
+        );
+        showToast(
+          "info",
+          tr(
+            res.removed.length === 1
+              ? "downloads.delete.deletedCountOne"
+              : "downloads.delete.deletedCountOther",
+            { n: res.removed.length },
+          ),
+        );
+        exitSelection();
+      } catch (e) {
+        // The selection deliberately survives a failure: it is the
+        // user's only record of what they were trying to delete, and
+        // rebuilding it by hand over a 950-row volume is worse than
+        // leaving the mode open behind an error toast.
+        showToast(
+          "error",
+          tr("downloads.delete.failed", {
+            error: e instanceof Error ? e.message : String(e),
+          }),
+        );
+      } finally {
+        deletingRef.current = false;
+        setDeleting(false);
+        setDeleteProgress(null);
+        void refreshFlags();
+      }
+    },
+    [libraryEntryId, refreshFlags, showToast, tr, exitSelection],
+  );
 
   // Per-volume "download all" — enqueues every not-yet-downloaded chapter in
   // one volume. Lazy volumes are fetched first so their chapter list exists
@@ -1880,6 +2306,140 @@ function VolumesAccordion({
       >
         {tr("novel.chaptersHeading")}
       </h2>
+      {selecting && (
+        <div
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            paddingBlock: 10,
+            paddingInline: 14,
+            background: theme.chrome,
+            borderBottom: `0.5px solid ${theme.rule}`,
+            position: "sticky",
+            top: 0,
+            zIndex: 20,
+          }}
+        >
+          <button
+            onClick={exitSelection}
+            aria-label={tr("downloads.delete.exitSelection")}
+            style={{
+              width: 32,
+              height: 32,
+              display: "grid",
+              placeItems: "center",
+              border: "none",
+              background: "transparent",
+              color: theme.muted,
+              cursor: "pointer",
+              borderRadius: 8,
+            }}
+          >
+            <Icon name="close" size={15} />
+          </button>
+          <span style={{ fontWeight: 600, fontSize: 12.5 }}>
+            {tr("downloads.delete.selectionCount", { n: selected.size })}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={() => {
+              // Candidate ids come from chapterFlags (rebuilt from the
+              // full disk snapshot by refreshFlags), not novel.volumes.
+              // For a lazy-volume source, a volume's chapters[] stays []
+              // until the user expands it in THIS session — but
+              // DownloadRangeDialog can populate chapterFlags for a
+              // volume via setVolumeChapters without ever patching
+              // novel.volumes (it doesn't call onNovelPatch). Building
+              // "all" from novel.volumes would silently drop those
+              // already-downloaded chapters from the selection. The
+              // predicate itself still lives in chapterDeletion.ts, not
+              // an inline filter — it's already unit-tested there.
+              setSelected(
+                new Set(
+                  downloadedChapterIds(
+                    Array.from(chapterFlags.keys()),
+                    chapterFlags,
+                  ),
+                ),
+              );
+            }}
+            style={{
+              font: "inherit",
+              fontSize: 11.5,
+              paddingBlock: 6,
+              paddingInline: 12,
+              borderRadius: 999,
+              border: `0.5px solid ${theme.rule}`,
+              background: "transparent",
+              color: theme.ink,
+              cursor: "pointer",
+            }}
+          >
+            {tr("downloads.delete.selectAllDownloaded")}
+          </button>
+          <button
+            disabled={selected.size === 0 || deleting}
+            onClick={() => stageDelete([...selected])}
+            style={{
+              font: "inherit",
+              fontSize: 11.5,
+              paddingBlock: 6,
+              paddingInline: 12,
+              borderRadius: 999,
+              border: `0.5px solid ${theme.danger}`,
+              background: theme.danger,
+              // theme.bg, not #fff: theme.danger is a LIGHT red on the
+              // dark themes (it has to clear AA against a near-black
+              // background), and white on it measures under 3:1. Taking
+              // the background as the label colour makes this ratio
+              // identical to danger-vs-bg, which the token guarantees.
+              color: theme.bg,
+              cursor:
+                selected.size === 0 || deleting ? "default" : "pointer",
+              opacity: selected.size === 0 || deleting ? 0.45 : 1,
+            }}
+          >
+            {tr(
+              selected.size === 1
+                ? "downloads.delete.confirmButtonOne"
+                : "downloads.delete.confirmButtonOther",
+              { n: selected.size },
+            )}
+          </button>
+        </div>
+      )}
+      {deleteProgress && (
+        // Sits outside the selection bar on purpose: the ⋯ menu's
+        // "delete read"/"delete all" presets never enter selection
+        // mode, so a counter living in that bar would be invisible for
+        // exactly the biggest sweeps.
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            paddingBlock: 8,
+            paddingInline: 14,
+            borderRadius: 10,
+            background: theme.chrome,
+            border: `0.5px solid ${theme.rule}`,
+            color: theme.muted,
+            fontSize: 11.5,
+          }}
+        >
+          <Icon name="trash" size={13} />
+          <span>
+            {tr("downloads.delete.deleting", {
+              done: deleteProgress.done,
+              total: deleteProgress.total,
+            })}
+          </span>
+        </div>
+      )}
       {novel.volumes.map((v) => {
         const isOpen = open.has(v.id);
         const count = v.chapters.length > 0 ? v.chapters.length : v.chapterCount ?? 0;
@@ -2030,6 +2590,46 @@ function VolumesAccordion({
                   />
                 </button>
               )}
+              {libraryEntryId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    volumeMenuTriggerRef.current = e.currentTarget;
+                    // Toggle, not open. DesktopPopover's outside-press
+                    // listener skips this button, so a second click
+                    // reaches here with the menu still open and closes
+                    // it; a click on another volume's ⋯ arrives after
+                    // that listener already closed the old one, so
+                    // `prev` is null and the new volume opens.
+                    setVolumeMenu((prev) =>
+                      prev?.id === v.id
+                        ? null
+                        : {
+                            id: v.id,
+                            left: r.left,
+                            right: r.right,
+                            y: r.bottom,
+                          },
+                    );
+                  }}
+                  title={tr("downloads.delete.volumeActions")}
+                  aria-label={tr("downloads.delete.volumeActions")}
+                  style={{
+                    flexShrink: 0,
+                    width: 42,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "none",
+                    background: "transparent",
+                    color: theme.muted,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Icon name="more" size={15} />
+                </button>
+              )}
             </div>
             {isOpen && (
               <>
@@ -2074,7 +2674,14 @@ function VolumesAccordion({
                 items={v.chapters}
                 estimatedItemHeight={CHAPTER_ROW_HEIGHT}
                 itemKey={(c) => c.id}
-                role="list"
+                // Rows carry role="option"/aria-selected while selecting
+                // (NovelDetailView's ChapterRow), so the container has to
+                // switch from list/listitem to listbox/option in step —
+                // `option` outside a `listbox` is not a valid ARIA
+                // pairing and leaves selection-mode screen-reader
+                // behaviour undefined.
+                role={selecting ? "listbox" : "list"}
+                ariaMultiselectable={selecting ? true : undefined}
                 className="riwaq-scroll-hidden riwaq-collapse-enter"
                 ariaLabel={v.title}
                 style={{
@@ -2095,7 +2702,11 @@ function VolumesAccordion({
                     novelTitle={novel.title}
                     queueJob={activeJobs.get(c.id)}
                     onOpenChapter={onOpenChapter}
-                    onFlagsChanged={refreshFlags}
+                    onRequestDelete={deleteOneChapter}
+                    selecting={selecting}
+                    selected={selected.has(c.id)}
+                    onToggleSelect={toggleSelected}
+                    onEnterSelection={enterSelection}
                   />
                 )}
               />
@@ -2103,6 +2714,147 @@ function VolumesAccordion({
           </div>
         );
       })}
+      {(() => {
+        // VolumeActionsMenu stays mounted regardless of `volumeMenu` —
+        // only `open` toggles. On mobile this is load-bearing: its
+        // MobileSheet plays a slide-down exit whose setTimeout unmount
+        // never gets to run if the whole tree is torn down synchronously
+        // in the same render that nulls `volumeMenu` (see AnimatedDialog's
+        // and DownloadRangeDialog's identical always-mounted convention).
+        // The derived values below tolerate `volumeMenu === null` — once
+        // closed, MobileSheet freezes its last (non-empty) children for
+        // the exit animation, so these empty fallbacks are never actually
+        // painted; they just keep this block safe to evaluate every render.
+        const vol = volumeMenu
+          ? novel.volumes.find((v) => v.id === volumeMenu.id)
+          : undefined;
+        const all = (vol?.chapters ?? []).map((c) => c.id);
+        // Predicates live in chapterDeletion.ts, not inline here —
+        // "both downloaded AND read" is the kind of condition that
+        // quietly drifts, and it needs a test.
+        const downloaded = downloadedChapterIds(all, chapterFlags);
+        const read = readDownloadedChapterIds(all, chapterFlags);
+        return (
+          <VolumeActionsMenu
+            theme={theme}
+            layout={layout}
+            open={volumeMenu !== null}
+            anchor={
+              volumeMenu
+                ? {
+                    left: volumeMenu.left,
+                    right: volumeMenu.right,
+                    y: volumeMenu.y,
+                  }
+                : null
+            }
+            triggerRef={volumeMenuTriggerRef}
+            title={vol?.title ?? ""}
+            // Not novel.chapterCountShort ("{n} ch."): a 200-chapter
+            // volume with 12 downloads rendered "12 ch." under its own
+            // title, which reads as the volume's size rather than its
+            // download count. Wrong in both languages.
+            subtitle={
+              all.length > 0
+                ? tr("downloads.delete.downloadedCount", {
+                    n: downloaded.length,
+                  })
+                : ""
+            }
+            // Say why, when both rows come up disabled. A lazy-volume
+            // source hands us chapters: [] until the volume is expanded
+            // in this session, so "nothing downloaded" and "we haven't
+            // looked yet" are different states and only one of them is
+            // the user's problem to fix. Loading the volume from here
+            // is deliberately deferred.
+            note={
+              all.length === 0
+                ? tr("downloads.delete.volumeNotLoaded")
+                : downloaded.length === 0
+                  ? tr("downloads.delete.nothingToDelete")
+                  : undefined
+            }
+            actions={[
+              {
+                id: "delete-read",
+                label: tr("downloads.delete.deleteRead"),
+                icon: "trash",
+                destructive: true,
+                disabled: read.length === 0 || deleting,
+              },
+              {
+                id: "delete-all",
+                label: tr("downloads.delete.deleteAllInVolume"),
+                icon: "trash",
+                destructive: true,
+                disabled: downloaded.length === 0 || deleting,
+              },
+            ]}
+            onPick={(id) => {
+              stageDelete(id === "delete-read" ? read : downloaded);
+            }}
+            onClose={closeVolumeMenu}
+          />
+        );
+      })()}
+
+      <AnimatedDialog
+        open={deleteConfirm !== null}
+        onScrimClick={() => setDeleteConfirm(null)}
+        zIndex={9700}
+      >
+        {deleteConfirm && (
+          <ConfirmDialog
+            theme={theme}
+            title={tr(
+              deleteConfirm.ids.length === 1
+                ? "downloads.delete.confirmTitleOne"
+                : "downloads.delete.confirmTitleOther",
+              { n: deleteConfirm.ids.length },
+            )}
+            confirmVariant="destructive"
+            confirmLabel={tr(
+              deleteConfirm.ids.length === 1
+                ? "downloads.delete.confirmButtonOne"
+                : "downloads.delete.confirmButtonOther",
+              { n: deleteConfirm.ids.length },
+            )}
+            cancelLabel={tr("common.cancel")}
+            message={
+              <>
+                {tr("downloads.delete.confirmBody")}
+                {deleteConfirm.conversionActive && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      marginBlockStart: 10,
+                      // theme.ink against the dialog body's theme.muted,
+                      // plus the icon: the warning must not rest on
+                      // colour alone.
+                      color: theme.ink,
+                    }}
+                  >
+                    <Icon
+                      name="info"
+                      size={14}
+                      style={{ flexShrink: 0, marginBlockStart: 2 }}
+                    />
+                    <span>{tr("downloads.delete.conversionRunning")}</span>
+                  </div>
+                )}
+              </>
+            }
+            onConfirm={() => {
+              const ids = deleteConfirm.ids;
+              setDeleteConfirm(null);
+              void runBulkDelete(ids);
+            }}
+            onCancel={() => setDeleteConfirm(null)}
+          />
+        )}
+      </AnimatedDialog>
+
       {/* AnimatedDialog stays mounted and takes `open` as a prop — it keeps the
           last children around to play the exit animation. Unmounting the whole
           thing on cancel would snap it off-screen instead. */}
@@ -2152,6 +2904,7 @@ function VolumesAccordion({
           />
         )}
       </AnimatedDialog>
+      <Toast theme={theme} toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }

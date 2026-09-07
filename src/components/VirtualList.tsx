@@ -248,8 +248,15 @@ interface MeasuredVirtualListProps<T> {
   /** ARIA role for the scrolling container. Pass "list" when the rows are
    *  `role="listitem"` — windowing replaces the `<ul>`/`<li>` parent-child
    *  relationship with absolutely positioned wrappers, so the semantics have
-   *  to be restated explicitly. */
+   *  to be restated explicitly. Pass "listbox" when the rows are
+   *  `role="option"` instead (e.g. a selection mode) — pair with
+   *  `ariaMultiselectable`. The absolutely-positioned per-row wrapper this
+   *  component renders carries no role of its own, so it stays transparent
+   *  to the accessibility tree and doesn't break either pairing. */
   role?: string;
+  /** Sets `aria-multiselectable` on the scrolling container. Only meaningful
+   *  when `role="listbox"`. */
+  ariaMultiselectable?: boolean;
 }
 
 /**
@@ -276,6 +283,7 @@ export function MeasuredVirtualList<T>({
   className,
   ariaLabel,
   role,
+  ariaMultiselectable,
 }: MeasuredVirtualListProps<T>) {
   const ref = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>({
@@ -380,6 +388,7 @@ export function MeasuredVirtualList<T>({
       onScroll={onScroll}
       aria-label={ariaLabel}
       role={role}
+      aria-multiselectable={ariaMultiselectable}
       className={className}
       style={{ overflowY: "auto", position: "relative", ...style }}
     >

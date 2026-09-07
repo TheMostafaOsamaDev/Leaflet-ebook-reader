@@ -60,7 +60,23 @@ export const ICONS = {
   info: "M12 22a10 10 0 100-20 10 10 0 000 20zM12 7v7M12 17h.01",
   doc: "M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9zM14 3v6h6M9 13h6M9 17h6",
   slider: "M3 12h6M15 12h6M10 12a2 2 0 1 0 4 0 2 2 0 1 0 -4 0",
+  // Local storage — the "downloaded / on device" marker in the chapter list.
+  // Card body then the contact pins; the pins must stay a separate subpath so
+  // they never take a fill.
+  sdCard: [
+    "M6 2.5h8L19 7.5V21a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 21V4A1.5 1.5 0 016 2.5z",
+    "M9 6v3M12 6v3M15 7v2",
+  ],
+  // The chapter list's "online only" marker: the download arrow enclosed, so
+  // it reads as the action rather than a bare direction.
+  downloadCirc: [
+    "M12 22a10 10 0 100-20 10 10 0 000 20z",
+    "M12 7.5v7M8.5 11l3.5 3.5 3.5-3.5",
+  ],
+  // Failed download. Distinct from `info`, which stays the neutral notice.
+  xCirc: ["M12 22a10 10 0 100-20 10 10 0 000 20z", "M9 9l6 6M15 9l-6 6"],
   trash: "M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6",
+  more: "M12 5h.01M12 12h.01M12 19h.01",
   bookmark: "M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z",
   globe:
     "M12 22a10 10 0 100-20 10 10 0 000 20zM2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z",
@@ -76,6 +92,9 @@ export function Icon({
   style,
   className,
 }: IconProps) {
+  const glyph = ICONS[name];
+  const subpaths: readonly string[] =
+    typeof glyph === "string" ? [glyph] : glyph;
   return (
     <svg
       width={size}
@@ -89,7 +108,13 @@ export function Icon({
       style={style}
       className={className}
     >
-      <path d={ICONS[name]} />
+      {/* Most glyphs are a single path. A few are a shape plus a detail
+          stroke (a circle behind an arrow, a card behind its pins) and have
+          to stay separate subpaths. Only the FIRST takes the svg's `fill` —
+          a detail stroke that filled would blot the glyph. */}
+      {subpaths.map((d, i) => (
+        <path key={i} d={d} {...(i > 0 ? { fill: "none" } : {})} />
+      ))}
     </svg>
   );
 }

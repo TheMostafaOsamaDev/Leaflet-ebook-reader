@@ -356,6 +356,35 @@ export const ar: Messages = {
   "downloads.range.nothingToDownload": "لا شيء لتنزيله",
   "downloads.range.queueButton": "إضافة {n} إلى القائمة",
 
+  "downloads.delete.chapterLabel": "حذف تنزيل الفصل {n}",
+  "downloads.delete.deleted": "تم حذف «{title}»",
+  "downloads.delete.deletedAndCancelled": "تم الإلغاء وحذف «{title}»",
+  "downloads.delete.redownload": "إعادة التنزيل",
+  "downloads.delete.volumeActions": "إجراءات المجلد",
+  "downloads.delete.deleteRead": "حذف تنزيلات الفصول المقروءة",
+  "downloads.delete.deleteAllInVolume": "حذف كل تنزيلات المجلد",
+  "downloads.delete.nothingToDelete": "لا توجد تنزيلات للحذف",
+  "downloads.delete.confirmTitleOne": "حذف تنزيل واحد؟",
+  "downloads.delete.confirmTitleOther": "حذف {n} تنزيلات؟",
+  "downloads.delete.confirmBody":
+    "تبقى هذه الفصول في القائمة ويمكن قراءتها عبر الإنترنت أو تنزيلها مرة أخرى. ويُحتفظ بتقدّم القراءة.",
+  "downloads.delete.confirmButtonOne": "حذف واحد",
+  "downloads.delete.confirmButtonOther": "حذف {n}",
+  "downloads.delete.deletedCountOne": "تم حذف تنزيل واحد",
+  "downloads.delete.deletedCountOther": "تم حذف {n} تنزيلات",
+  "downloads.delete.selectionCount": "{n} محدد",
+  "downloads.delete.selectAllDownloaded": "تحديد كل المنزَّل",
+  "downloads.delete.exitSelection": "إنهاء التحديد",
+  "downloads.delete.selectChapter": "تحديد الفصل {n}: {title}",
+  "downloads.delete.downloadedCount": "{n} فصل منزَّل",
+  "downloads.delete.volumeNotLoaded":
+    "افتح هذا المجلد لإدارة تنزيلاته.",
+  "downloads.delete.nothingRemoved": "لا يوجد تنزيل على القرص للفصل «{title}»",
+  "downloads.delete.failed": "تعذّر الحذف: {error}",
+  "downloads.delete.deleting": "جارٍ الحذف… {done} من {total}",
+  "downloads.delete.conversionRunning":
+    "هناك مهمة «حفظ ككتاب دون اتصال» تعمل على هذه الرواية. ستعيد جلب كل فصل محذوف من المصدر بدلًا من قراءته من القرص، وهذا أبطأ بكثير.",
+
   "downloads.saveOffline.title": "حفظ كتاب غير متصل",
   "downloads.saveOffline.loading": "جارٍ تحميل قائمة المجلدات…",
   "downloads.saveOffline.readError":

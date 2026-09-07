@@ -36,6 +36,22 @@ export interface Theme {
    *  lighter (dark themes) sibling of `chrome`, so the control keeps a solid
    *  fill and the state change stays legible on any background. */
   chromeHover: string;
+  /** Destructive-action colour: delete affordances, error glyphs, the
+   *  bulk-delete button's fill. Tuned per theme against that theme's
+   *  `bg` — the flat #b75050 this replaced measured 3.66:1 on dark's
+   *  #1a1614 and 4.17:1 on sepia's #f4ecd8, both under WCAG AA 4.5:1
+   *  for the 13px destructive menu labels where colour is the only
+   *  signal beyond the trash glyph.
+   *
+   *  Every value below clears 4.5:1 against its theme's `bg` AND
+   *  against `bg` with `hover` composited over it (list rows arm their
+   *  trash icon on hover, so the hovered surface is the one that
+   *  matters). A solid destructive fill therefore takes `theme.bg` as
+   *  its text colour — the ratio is the token's own bg ratio by
+   *  construction, so it can never drift out of AA. Mirrors Material
+   *  3's error / on-error pairing, where the dark scheme's error is a
+   *  LIGHT red carrying dark text. */
+  danger: string;
 }
 
 export const THEMES: Record<ThemeKey, Theme> = {
@@ -52,6 +68,8 @@ export const THEMES: Record<ThemeKey, Theme> = {
     chromeInk: "#5a4a2e",
     hover: "rgba(58,47,31,0.06)",
     chromeHover: "#e0d3b2",
+    // 5.18:1 on bg, 4.68:1 hovered.
+    danger: "#a4433c",
   },
   light: {
     bg: "#faf8f3",
@@ -65,6 +83,8 @@ export const THEMES: Record<ThemeKey, Theme> = {
     chromeInk: "#3a332a",
     hover: "rgba(31,26,20,0.05)",
     chromeHover: "#e5ded0",
+    // 5.74:1 on bg, 5.21:1 hovered.
+    danger: "#a4433c",
   },
   dark: {
     bg: "#1a1614",
@@ -79,6 +99,8 @@ export const THEMES: Record<ThemeKey, Theme> = {
     chromeInk: "#c4b89c",
     hover: "rgba(216,203,176,0.06)",
     chromeHover: "#322d27",
+    // 5.79:1 on bg, 5.15:1 hovered.
+    danger: "#d4796f",
   },
   oled: {
     bg: "#000000",
@@ -93,6 +115,8 @@ export const THEMES: Record<ThemeKey, Theme> = {
     chromeInk: "#a89d84",
     hover: "rgba(184,173,148,0.05)",
     chromeHover: "#211d17",
+    // 6.26:1 on bg, 5.94:1 hovered.
+    danger: "#cf7268",
   },
 };
 
