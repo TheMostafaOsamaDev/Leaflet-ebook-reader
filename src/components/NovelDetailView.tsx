@@ -1839,11 +1839,26 @@ function VolumesAccordion({
   // Refresh chapter flags on demand — used by the per-chapter download
   // button once a download completes. Reads source.json and rebuilds
   // the flag map.
+  //
+  // Generation-guarded, because these overlap and don't resolve in
+  // order. Cancelling a QUEUED job inside cancelJobsForChapters calls
+  // setStatus(…, "cancelled") synchronously, which emits, which makes
+  // the queue subscription below see a new terminal job and fire its
+  // own refreshFlags — so a read of the PRE-delete snapshot is already
+  // in flight before the sweep starts, and runBulkDelete fires another
+  // one when it finishes. If the first read lands last (a multi-MB
+  // source.json on Android competing with 200 in-flight remove()
+  // calls) the deleted chapters flip back to "downloaded" until the
+  // next queue tick or navigation, and the delete looks like it
+  // failed. Only the newest read may write.
+  const flagsGenRef = useRef(0);
   const refreshFlags = useCallback(async () => {
     if (!libraryEntryId) return;
+    const gen = ++flagsGenRef.current;
     const { readSnapshot } = await import("../store/sourceLibrary");
     const snap = await readSnapshot(libraryEntryId);
     if (!snap) return;
+    if (gen !== flagsGenRef.current) return;
     onChapterFlagsChange(buildFlagMap(snap));
   }, [libraryEntryId, onChapterFlagsChange]);
 
@@ -1862,6 +1877,14 @@ function VolumesAccordion({
     },
     [],
   );
+  // Stable, like closeVolumeMenu above and for the same reason. Toast's
+  // auto-dismiss effect lists onDismiss in its deps, so an inline arrow
+  // restarted the 3.5s timer on every parent re-render — and this
+  // component re-renders on every queue emission, roughly 25 per
+  // chapter (one per image). Deleting chapter 5 while chapter 7
+  // downloaded pinned the toast, and its stale "Re-download chapter 5"
+  // button, for the whole remaining download.
+  const dismissToast = useCallback(() => setToast(null), []);
 
   /** One row's delete, end to end: run it, refresh the flags, report
    *  what actually happened.
@@ -2853,7 +2876,7 @@ function VolumesAccordion({
           />
         )}
       </AnimatedDialog>
-      <Toast theme={theme} toast={toast} onDismiss={() => setToast(null)} />
+      <Toast theme={theme} toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }
