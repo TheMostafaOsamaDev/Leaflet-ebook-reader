@@ -434,6 +434,9 @@ export const en = {
   "downloads.delete.selectAllDownloaded": "Select all downloaded",
   "downloads.delete.exitSelection": "Exit selection",
   "downloads.delete.selectChapter": "Select chapter {n}",
+  "downloads.delete.nothingRemoved": "No download on disk for “{title}”",
+  "downloads.delete.failed": "Couldn't delete: {error}",
+  "downloads.delete.deleting": "Deleting… {done} of {total}",
 
   // save-as-offline-book dialog
   "downloads.saveOffline.title": "Save as offline book",

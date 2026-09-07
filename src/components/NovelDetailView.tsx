@@ -1291,11 +1291,11 @@ interface ChapterRowProps {
   novelTitle: string;
   queueJob: DownloadJob | undefined;
   onOpenChapter: (chapterId: number) => void;
-  /** Called after a row's own delete completes. `wasRunning` is true when
-   *  the chapter had a download actually in flight at the moment of
-   *  deletion, so the caller can say "cancelled and deleted" instead of
-   *  plain "deleted". */
-  onDeleted: (chapterId: number, wasRunning: boolean) => void;
+  /** Asks the accordion to delete this row's download. A request, not a
+   *  notification: the accordion owns deleteChaptersWithQueue, the flag
+   *  refresh and every toast this can produce — including the error one
+   *  a failed snapshot write needs, which a row has no channel for. */
+  onRequestDelete: (chapterId: number) => void;
   /** True once the accordion is in selection mode (any row long-pressed
    *  or right-clicked). Swaps the row's click behaviour from "open
    *  chapter" to "toggle selection" and reveals the checkbox. */
@@ -1328,7 +1328,7 @@ const ChapterRow = memo(function ChapterRow({
   novelTitle,
   queueJob,
   onOpenChapter,
-  onDeleted,
+  onRequestDelete,
   selecting,
   selected,
   onToggleSelect,
@@ -1476,7 +1476,7 @@ const ChapterRow = memo(function ChapterRow({
           novelTitle={novelTitle}
           chapterTitle={chapter.title}
           queueJob={queueJob}
-          onDeleted={onDeleted}
+          onRequestDelete={onRequestDelete}
         />
       )}
     </div>
@@ -1492,10 +1492,10 @@ interface ChapterDownloadButtonProps {
    *  ("downloaded" check icon, armed into a delete action) and as a
    *  guard against re-enqueuing. */
   downloaded: boolean;
-  /** Called after this row's own delete completes. `wasRunning` is true
-   *  when the chapter had a download actually in flight at the moment
-   *  of deletion. */
-  onDeleted: (chapterId: number, wasRunning: boolean) => void;
+  /** Asks the accordion to delete this chapter's download. See
+   *  ChapterRowProps.onRequestDelete for why the button doesn't run the
+   *  delete itself. */
+  onRequestDelete: (chapterId: number) => void;
 }
 
 function ChapterDownloadButton({
@@ -1506,7 +1506,7 @@ function ChapterDownloadButton({
   novelTitle,
   chapterTitle,
   queueJob,
-  onDeleted,
+  onRequestDelete,
 }: ChapterDownloadButtonProps & {
   novelTitle: string;
   chapterTitle: string;
@@ -1525,11 +1525,12 @@ function ChapterDownloadButton({
         // Single deletes skip the dialog: a deleted chapter is always
         // re-downloadable from the source, so the toast's action is a
         // cheaper undo than a modal. Bulk deletes still confirm.
-        const { deleteChaptersWithQueue } = await import(
-          "../store/chapterDeletion"
-        );
-        const res = await deleteChaptersWithQueue(libraryEntryId, [chapterId]);
-        onDeleted(chapterId, res.cancelledRunning.length > 0);
+        //
+        // The delete runs in the accordion rather than here. It has to:
+        // deleteChapterDownloads ends in a writeTextFile that throws on
+        // a full disk — exactly the state a user deleting downloads is
+        // in — and the toast that has to report that lives up there.
+        onRequestDelete(chapterId);
         return;
       }
       if (queueJob) {
@@ -1547,7 +1548,7 @@ function ChapterDownloadButton({
       queueJob,
       novelTitle,
       chapterTitle,
-      onDeleted,
+      onRequestDelete,
     ],
   );
 
@@ -1849,37 +1850,74 @@ function VolumesAccordion({
     [],
   );
 
-  const onChapterDeleted = useCallback(
-    (chapterId: number, wasRunning: boolean) => {
-      void refreshFlags();
+  /** One row's delete, end to end: run it, refresh the flags, report
+   *  what actually happened.
+   *
+   *  Every exit reports something. deleteChapterDownloads ends in a
+   *  writeTextFile, which throws when the disk is full — the state a
+   *  user deleting downloads is most likely to be in. Left uncaught
+   *  that was an unhandled rejection with no toast, no error, and a row
+   *  still showing a ✓ over content that is already gone. */
+  const deleteOneChapter = useCallback(
+    (chapterId: number) => {
+      if (!libraryEntryId) return;
       const chapter = novel.volumes
         .flatMap((v) => v.chapters)
         .find((c) => c.id === chapterId);
       const title = chapter?.title ?? String(chapterId);
-      showToast(
-        "info",
-        tr(
-          wasRunning
-            ? "downloads.delete.deletedAndCancelled"
-            : "downloads.delete.deleted",
-          { title },
-        ),
-        {
-          label: tr("downloads.delete.redownload"),
-          onClick: () => {
-            void (async () => {
-              const { enqueue } = await import("../store/downloadQueue");
-              if (!libraryEntryId || !chapter) return;
-              enqueue({
-                libraryEntryId,
-                chapterId,
-                novelTitle: novel.title,
-                chapterTitle: chapter.title,
-              });
-            })();
-          },
-        },
-      );
+      void (async () => {
+        try {
+          const { deleteChaptersWithQueue } = await import(
+            "../store/chapterDeletion"
+          );
+          const res = await deleteChaptersWithQueue(libraryEntryId, [
+            chapterId,
+          ]);
+          // res.removed is what the snapshot actually cleared. Saying
+          // "Deleted X" regardless of it means a chapter the snapshot
+          // never listed reads as freed disk that was never freed.
+          if (res.removed.length === 0) {
+            showToast("warn", tr("downloads.delete.nothingRemoved", { title }));
+            return;
+          }
+          showToast(
+            "info",
+            tr(
+              res.cancelledRunning.length > 0
+                ? "downloads.delete.deletedAndCancelled"
+                : "downloads.delete.deleted",
+              { title },
+            ),
+            {
+              label: tr("downloads.delete.redownload"),
+              onClick: () => {
+                void (async () => {
+                  const { enqueue } = await import("../store/downloadQueue");
+                  if (!chapter) return;
+                  enqueue({
+                    libraryEntryId,
+                    chapterId,
+                    novelTitle: novel.title,
+                    chapterTitle: chapter.title,
+                  });
+                })();
+              },
+            },
+          );
+        } catch (e) {
+          showToast(
+            "error",
+            tr("downloads.delete.failed", {
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          );
+        } finally {
+          // Either way: a throw can land after some directories were
+          // already swept, so the rows have to be rebuilt from disk
+          // rather than left on the pre-delete map.
+          void refreshFlags();
+        }
+      })();
     },
     [refreshFlags, showToast, tr, novel, libraryEntryId],
   );
@@ -1900,6 +1938,29 @@ function VolumesAccordion({
   const [deleteConfirm, setDeleteConfirm] = useState<{
     ids: number[];
   } | null>(null);
+  /** Live counter for a bulk delete, driven by deleteChapterDownloads'
+   *  every-25-chapters onProgress. Non-null exactly while a sweep runs,
+   *  so it doubles as the "show the progress line" flag.
+   *
+   *  A 950-chapter volume is 950 sequential remove() IPC round-trips
+   *  with the entry lock held — minutes on Android. Without this the
+   *  only feedback was a toast at the very end. */
+  const [deleteProgress, setDeleteProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  /** Disables the bulk-delete affordances while a sweep is in flight.
+   *  The ref is the actual guard — two synchronous confirms would both
+   *  read a not-yet-committed `false` out of the state variable. The
+   *  state exists only so the buttons re-render disabled.
+   *
+   *  Without it: confirm "delete all in volume", reopen the ⋯ menu
+   *  (still computing `downloaded` from the pre-delete chapterFlags),
+   *  confirm the same 950 ids again. The second call serializes behind
+   *  the entry lock, finds every flag already clear, and reports
+   *  "Deleted 0 downloads" after 950 more remove() calls. */
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
 
   // Selection state is declared here, ahead of runBulkDelete: runBulkDelete
   // calls exitSelection at the end, and a `const` arrow declared below it
@@ -1943,21 +2004,49 @@ function VolumesAccordion({
   const runBulkDelete = useCallback(
     async (ids: number[]) => {
       if (!libraryEntryId || ids.length === 0) return;
-      const { deleteChaptersWithQueue } = await import(
-        "../store/chapterDeletion"
-      );
-      const res = await deleteChaptersWithQueue(libraryEntryId, ids);
-      void refreshFlags();
-      showToast(
-        "info",
-        tr(
-          res.removed.length === 1
-            ? "downloads.delete.deletedCountOne"
-            : "downloads.delete.deletedCountOther",
-          { n: res.removed.length },
-        ),
-      );
-      exitSelection();
+      if (deletingRef.current) return;
+      deletingRef.current = true;
+      setDeleting(true);
+      // Seed at 0/total so the line appears the moment the sweep starts.
+      // onProgress only fires every 25 chapters, so a small batch would
+      // otherwise show nothing at all until it finished.
+      setDeleteProgress({ done: 0, total: ids.length });
+      try {
+        const { deleteChaptersWithQueue } = await import(
+          "../store/chapterDeletion"
+        );
+        const res = await deleteChaptersWithQueue(
+          libraryEntryId,
+          ids,
+          (done, total) => setDeleteProgress({ done, total }),
+        );
+        showToast(
+          "info",
+          tr(
+            res.removed.length === 1
+              ? "downloads.delete.deletedCountOne"
+              : "downloads.delete.deletedCountOther",
+            { n: res.removed.length },
+          ),
+        );
+        exitSelection();
+      } catch (e) {
+        // The selection deliberately survives a failure: it is the
+        // user's only record of what they were trying to delete, and
+        // rebuilding it by hand over a 950-row volume is worse than
+        // leaving the mode open behind an error toast.
+        showToast(
+          "error",
+          tr("downloads.delete.failed", {
+            error: e instanceof Error ? e.message : String(e),
+          }),
+        );
+      } finally {
+        deletingRef.current = false;
+        setDeleting(false);
+        setDeleteProgress(null);
+        void refreshFlags();
+      }
     },
     [libraryEntryId, refreshFlags, showToast, tr, exitSelection],
   );
@@ -2192,7 +2281,7 @@ function VolumesAccordion({
             {tr("downloads.delete.selectAllDownloaded")}
           </button>
           <button
-            disabled={selected.size === 0}
+            disabled={selected.size === 0 || deleting}
             onClick={() => setDeleteConfirm({ ids: [...selected] })}
             style={{
               font: "inherit",
@@ -2208,8 +2297,9 @@ function VolumesAccordion({
               // the background as the label colour makes this ratio
               // identical to danger-vs-bg, which the token guarantees.
               color: theme.bg,
-              cursor: selected.size === 0 ? "default" : "pointer",
-              opacity: selected.size === 0 ? 0.45 : 1,
+              cursor:
+                selected.size === 0 || deleting ? "default" : "pointer",
+              opacity: selected.size === 0 || deleting ? 0.45 : 1,
             }}
           >
             {tr(
@@ -2219,6 +2309,36 @@ function VolumesAccordion({
               { n: selected.size },
             )}
           </button>
+        </div>
+      )}
+      {deleteProgress && (
+        // Sits outside the selection bar on purpose: the ⋯ menu's
+        // "delete read"/"delete all" presets never enter selection
+        // mode, so a counter living in that bar would be invisible for
+        // exactly the biggest sweeps.
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            paddingBlock: 8,
+            paddingInline: 14,
+            borderRadius: 10,
+            background: theme.chrome,
+            border: `0.5px solid ${theme.rule}`,
+            color: theme.muted,
+            fontSize: 11.5,
+          }}
+        >
+          <Icon name="trash" size={13} />
+          <span>
+            {tr("downloads.delete.deleting", {
+              done: deleteProgress.done,
+              total: deleteProgress.total,
+            })}
+          </span>
         </div>
       )}
       {novel.volumes.map((v) => {
@@ -2467,7 +2587,7 @@ function VolumesAccordion({
                     novelTitle={novel.title}
                     queueJob={activeJobs.get(c.id)}
                     onOpenChapter={onOpenChapter}
-                    onDeleted={onChapterDeleted}
+                    onRequestDelete={deleteOneChapter}
                     selecting={selecting}
                     selected={selected.has(c.id)}
                     onToggleSelect={toggleSelected}
@@ -2513,14 +2633,14 @@ function VolumesAccordion({
                 label: tr("downloads.delete.deleteRead"),
                 icon: "trash",
                 destructive: true,
-                disabled: read.length === 0,
+                disabled: read.length === 0 || deleting,
               },
               {
                 id: "delete-all",
                 label: tr("downloads.delete.deleteAllInVolume"),
                 icon: "trash",
                 destructive: true,
-                disabled: downloaded.length === 0,
+                disabled: downloaded.length === 0 || deleting,
               },
             ]}
             onPick={(id) => {
