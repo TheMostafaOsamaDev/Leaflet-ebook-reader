@@ -795,13 +795,23 @@ export async function downloadChapter(
     return local ? { type: "image", content: local } : ln;
   });
 
-  // Cancellation check before writing chapter content to disk. The
-  // existing poll right after writeChapterContent (below) is what
-  // guards markChapterDownloaded — this one is narrower: it stops
-  // writeChapterContent itself from recreating content.json and image
-  // files once cancellation is already known, which would otherwise
-  // leave orphaned files behind in a chapter directory a concurrent
-  // delete just removed.
+  // Last cooperative cancellation check before anything is persisted.
+  //
+  // The mechanism, because the line below does not look like one:
+  // runChapterJob's onProgress throws CancelledError when the job has
+  // been cancelled, so `onProgress?.(0.9)` IS the poll. It is not a
+  // progress report that happens to sit here, and removing it as a
+  // redundant tick reopens the race it closes.
+  //
+  // The poll right after writeChapterContent guards
+  // markChapterDownloaded. This one is narrower: it stops
+  // writeChapterContent itself from recreating content.json and the
+  // image files once cancellation is already known, which would
+  // otherwise leave orphaned files behind in a chapter directory a
+  // concurrent delete just removed — files on disk with the flag
+  // clear, which nothing would ever reclaim.
+  //
+  // Both polls are covered in downloadQueue.test.ts.
   onProgress?.(0.9);
   await writeChapterContent(libraryEntryId, chapterId, rewritten, imageFiles);
   onProgress?.(0.95);
