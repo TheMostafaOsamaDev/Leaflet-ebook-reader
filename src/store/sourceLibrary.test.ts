@@ -188,6 +188,16 @@ describe("deleteChapterDownloads", () => {
     expect(snapshot).toBeNull();
   });
 
+  it("skips the snapshot write when no requested id is in the listing", async () => {
+    seed(3);
+    writeCount = 0;
+    const { removed: gone } = await deleteChapterDownloads(ENTRY, [99]);
+    expect(gone).toEqual([]);
+    // Rewriting a snapshot that didn't change is a multi-MB serialize
+    // and write on a 950-chapter novel, for nothing.
+    expect(writeCount).toBe(0);
+  });
+
   it("is a no-op for an empty id list", async () => {
     seed(3);
     writeCount = 0;

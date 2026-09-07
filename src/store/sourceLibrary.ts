@@ -548,6 +548,13 @@ async function deleteChapterDownloadsImpl(
     }
   }
 
+  if (removed.length === 0) {
+    // Nothing in the listing matched, so the snapshot would go back to
+    // disk byte-identical. On a 950-chapter novel that is a multi-MB
+    // serialize and write bought for no change at all.
+    return { removed, snapshot: snap };
+  }
+
   await writeTextFile(snapshotPath(entryId), JSON.stringify(snap), {
     baseDir: BASE,
   });
