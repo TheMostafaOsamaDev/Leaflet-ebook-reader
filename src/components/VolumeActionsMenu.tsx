@@ -72,6 +72,11 @@ export function VolumeActionsMenu({
             gap: 10,
             width: "100%",
             // 44px minimum touch target, and comfortable with a mouse.
+            // minHeight, not padding alone: 12px blocks around a 15px
+            // line box measured 39px, so the comment was describing an
+            // intention the row didn't meet — on a destructive action
+            // that is a mobile mis-tap away from a bulk delete.
+            minHeight: 44,
             paddingBlock: 12,
             paddingInline: 12,
             border: "none",
@@ -221,7 +226,13 @@ function DesktopPopover({
           ),
         ),
         zIndex: 9800,
-        minWidth: 250,
+        // Pinned, not minWidth: the note line's copy can be wider than
+        // 250 and a box that outgrows MENU_BOX_WIDTH invalidates both
+        // the RTL mirror and the viewport clamp above — measured at 304
+        // wide in Arabic, hanging 42px past where the clamp thought the
+        // right edge was.
+        boxSizing: "border-box",
+        width: MENU_BOX_WIDTH,
         padding: 5,
         background: theme.bg,
         border: `0.5px solid ${theme.rule}`,
