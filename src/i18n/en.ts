@@ -437,6 +437,8 @@ export const en = {
   "downloads.delete.nothingRemoved": "No download on disk for “{title}”",
   "downloads.delete.failed": "Couldn't delete: {error}",
   "downloads.delete.deleting": "Deleting… {done} of {total}",
+  "downloads.delete.conversionRunning":
+    "A “Save as offline book” job is running for this novel. It will refetch every deleted chapter from the source instead of reading it from disk, which is much slower.",
 
   // save-as-offline-book dialog
   "downloads.saveOffline.title": "Save as offline book",

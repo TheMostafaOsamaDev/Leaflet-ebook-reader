@@ -379,6 +379,8 @@ export const ar: Messages = {
   "downloads.delete.nothingRemoved": "لا يوجد تنزيل على القرص للفصل «{title}»",
   "downloads.delete.failed": "تعذّر الحذف: {error}",
   "downloads.delete.deleting": "جارٍ الحذف… {done} من {total}",
+  "downloads.delete.conversionRunning":
+    "هناك مهمة «حفظ ككتاب دون اتصال» تعمل على هذه الرواية. ستعيد جلب كل فصل محذوف من المصدر بدلًا من قراءته من القرص، وهذا أبطأ بكثير.",
 
   "downloads.saveOffline.title": "حفظ كتاب غير متصل",
   "downloads.saveOffline.loading": "جارٍ تحميل قائمة المجلدات…",

@@ -1934,10 +1934,52 @@ function VolumesAccordion({
   // listeners on every parent re-render (the download-queue subscription
   // above re-renders this component frequently while the popover is open).
   const closeVolumeMenu = useCallback(() => setVolumeMenu(null), []);
-  /** Chapters staged for a bulk delete, awaiting the user's confirm. */
+  /** Chapters staged for a bulk delete, awaiting the user's confirm.
+   *  `conversionActive` is sampled once at stage time — see stageDelete. */
   const [deleteConfirm, setDeleteConfirm] = useState<{
     ids: number[];
+    conversionActive: boolean;
   } | null>(null);
+  /** Stage a bulk delete for confirmation, sampling the queue for a
+   *  live conversion of this same entry on the way.
+   *
+   *  The design spec's hazard 5: storeConversion's enrichChapter reads
+   *  a chapter from disk when downloadedAt is set and refetches it from
+   *  the source otherwise. Deleting under a running "Save as offline
+   *  book" therefore doesn't fail — it silently turns a fast local job
+   *  into hundreds of live scrapes, which is minutes-to-hours of
+   *  degradation plus real rate-limit exposure. So it warns, and does
+   *  NOT block: the user may well mean it.
+   *
+   *  Sampled here rather than read during render because the queue
+   *  module is loaded lazily throughout this file, and the confirm's
+   *  body has to be a plain synchronous render. A conversion starting
+   *  in the second between staging and confirming goes unwarned; that
+   *  is the honest cost of not making the dialog async. */
+  const stageDelete = useCallback(
+    (ids: number[]) => {
+      if (ids.length === 0) return;
+      void (async () => {
+        let conversionActive = false;
+        if (libraryEntryId) {
+          try {
+            const { getState } = await import("../store/downloadQueue");
+            conversionActive = getState().jobs.some(
+              (j) =>
+                j.kind === "conversion" &&
+                j.libraryEntryId === libraryEntryId &&
+                (j.status === "queued" || j.status === "running"),
+            );
+          } catch {
+            // Queue module unavailable — stage without the warning
+            // rather than blocking a delete the user asked for.
+          }
+        }
+        setDeleteConfirm({ ids, conversionActive });
+      })();
+    },
+    [libraryEntryId],
+  );
   /** Live counter for a bulk delete, driven by deleteChapterDownloads'
    *  every-25-chapters onProgress. Non-null exactly while a sweep runs,
    *  so it doubles as the "show the progress line" flag.
@@ -2282,7 +2324,7 @@ function VolumesAccordion({
           </button>
           <button
             disabled={selected.size === 0 || deleting}
-            onClick={() => setDeleteConfirm({ ids: [...selected] })}
+            onClick={() => stageDelete([...selected])}
             style={{
               font: "inherit",
               fontSize: 11.5,
@@ -2644,9 +2686,7 @@ function VolumesAccordion({
               },
             ]}
             onPick={(id) => {
-              setDeleteConfirm({
-                ids: id === "delete-read" ? read : downloaded,
-              });
+              stageDelete(id === "delete-read" ? read : downloaded);
             }}
             onClose={closeVolumeMenu}
           />
@@ -2675,7 +2715,31 @@ function VolumesAccordion({
               { n: deleteConfirm.ids.length },
             )}
             cancelLabel={tr("common.cancel")}
-            message={tr("downloads.delete.confirmBody")}
+            message={
+              <>
+                {tr("downloads.delete.confirmBody")}
+                {deleteConfirm.conversionActive && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      marginBlockStart: 10,
+                      // theme.ink against the dialog body's theme.muted,
+                      // plus the icon: the warning must not rest on
+                      // colour alone.
+                      color: theme.ink,
+                    }}
+                  >
+                    <Icon
+                      name="info"
+                      size={14}
+                      style={{ flexShrink: 0, marginBlockStart: 2 }}
+                    />
+                    <span>{tr("downloads.delete.conversionRunning")}</span>
+                  </div>
+                )}
+              </>
+            }
             onConfirm={() => {
               const ids = deleteConfirm.ids;
               setDeleteConfirm(null);
