@@ -1339,19 +1339,38 @@ const ChapterRow = memo(function ChapterRow({
   onEnterSelection,
 }: ChapterRowProps) {
   const { tr } = useI18n();
-  const { bind, consumeLongPress } = useLongPress(() =>
-    onEnterSelection(chapter.id),
-  );
+  // Long-press / right-click entry point, shared by the pointer-based
+  // long-press below and the onContextMenu handler.
+  //
+  // Only downloaded chapters are selectable — selection exists in order
+  // to delete, so a row with nothing to delete in the set would need a
+  // disabled state in the action bar. This guard used to live in the
+  // parent's `enterSelection`, keyed off `chapterFlags`, but that gave
+  // every row's `onEnterSelection` prop a new identity whenever flags
+  // were rebuilt, defeating the memo for every mounted row at once.
+  // `downloaded` is already a stable per-row boolean prop, so the guard
+  // belongs here instead.
+  //
+  // While already selecting, a long-press or right-click toggles the
+  // row like a tap does rather than resetting the whole selection to
+  // just this one chapter — otherwise a stray long-press mid-multi-select
+  // would silently collapse a large selection down to one row.
+  const activateForSelection = () => {
+    if (!downloaded) return;
+    if (selecting) onToggleSelect(chapter.id);
+    else onEnterSelection(chapter.id);
+  };
+  const { bind, consumeLongPress } = useLongPress(activateForSelection);
   return (
     <div
-      role="listitem"
+      role={selecting ? undefined : "listitem"}
       style={{ display: "flex", alignItems: "stretch", direction }}
     >
       <button
         {...bind}
         onContextMenu={(e) => {
           e.preventDefault();
-          onEnterSelection(chapter.id);
+          activateForSelection();
         }}
         onClick={() => {
           if (consumeLongPress()) return;
@@ -1912,17 +1931,18 @@ function VolumesAccordion({
     });
   }, []);
 
-  const enterSelection = useCallback(
-    (chapterId: number) => {
-      // Only downloaded chapters are selectable — selection exists in
-      // order to delete, so a row with nothing to delete in the set
-      // would need a disabled state in the action bar.
-      if (!chapterFlags.get(chapterId)?.downloadedAt) return;
-      setSelecting(true);
-      setSelected(new Set([chapterId]));
-    },
-    [chapterFlags],
-  );
+  // The "only downloaded chapters are selectable" guard used to live
+  // here and depend on `chapterFlags`, which made this callback (and
+  // therefore every mounted ChapterRow's `onEnterSelection` prop) get a
+  // new identity on every flag rebuild — defeating the row memo for all
+  // of them, not just the row whose flags actually changed. ChapterRow
+  // already receives `downloaded` as a boolean prop, so the guard now
+  // lives there instead, letting this stay a stable, dependency-free
+  // callback.
+  const enterSelection = useCallback((chapterId: number) => {
+    setSelecting(true);
+    setSelected(new Set([chapterId]));
+  }, []);
 
   const runBulkDelete = useCallback(
     async (ids: number[]) => {
@@ -2141,12 +2161,25 @@ function VolumesAccordion({
           <span style={{ flex: 1 }} />
           <button
             onClick={() => {
-              // Predicate lives in chapterDeletion.ts, not an inline
-              // filter — it's already unit-tested there.
-              const all = novel.volumes.flatMap((v) =>
-                v.chapters.map((c) => c.id),
+              // Candidate ids come from chapterFlags (rebuilt from the
+              // full disk snapshot by refreshFlags), not novel.volumes.
+              // For a lazy-volume source, a volume's chapters[] stays []
+              // until the user expands it in THIS session — but
+              // DownloadRangeDialog can populate chapterFlags for a
+              // volume via setVolumeChapters without ever patching
+              // novel.volumes (it doesn't call onNovelPatch). Building
+              // "all" from novel.volumes would silently drop those
+              // already-downloaded chapters from the selection. The
+              // predicate itself still lives in chapterDeletion.ts, not
+              // an inline filter — it's already unit-tested there.
+              setSelected(
+                new Set(
+                  downloadedChapterIds(
+                    Array.from(chapterFlags.keys()),
+                    chapterFlags,
+                  ),
+                ),
               );
-              setSelected(new Set(downloadedChapterIds(all, chapterFlags)));
             }}
             style={{
               font: "inherit",
@@ -2405,7 +2438,14 @@ function VolumesAccordion({
                 items={v.chapters}
                 estimatedItemHeight={CHAPTER_ROW_HEIGHT}
                 itemKey={(c) => c.id}
-                role="list"
+                // Rows carry role="option"/aria-selected while selecting
+                // (NovelDetailView's ChapterRow), so the container has to
+                // switch from list/listitem to listbox/option in step —
+                // `option` outside a `listbox` is not a valid ARIA
+                // pairing and leaves selection-mode screen-reader
+                // behaviour undefined.
+                role={selecting ? "listbox" : "list"}
+                ariaMultiselectable={selecting ? true : undefined}
                 className="riwaq-scroll-hidden riwaq-collapse-enter"
                 ariaLabel={v.title}
                 style={{
