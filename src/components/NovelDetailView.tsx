@@ -1356,7 +1356,14 @@ const ChapterRow = memo(function ChapterRow({
     if (selecting) onToggleSelect(chapter.id);
     else onEnterSelection(chapter.id);
   };
-  const { bind, consumeLongPress } = useLongPress(activateForSelection);
+  // ignoreMouse: this list's primary action is "open the chapter", and a
+  // deliberate slow left-click held past 500ms was entering selection
+  // mode instead. Desktop keeps the right-click entry below, which is
+  // unambiguous. An intentional, approved deviation from the design
+  // spec's "long-press or right-click" wording.
+  const { bind, consumeLongPress } = useLongPress(activateForSelection, {
+    ignoreMouse: true,
+  });
   return (
     <div
       role={selecting ? undefined : "listitem"}

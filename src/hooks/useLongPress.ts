@@ -12,6 +12,15 @@ export interface LongPressBindings {
   onPointerLeave: (e: ReactPointerEvent<HTMLElement>) => void;
 }
 
+export interface UseLongPressOptions {
+  /** Skip the long press entirely for a mouse pointer. Set it where the
+   *  element's primary click action matters more than its long-press
+   *  one and right-click already covers the desktop case — otherwise a
+   *  deliberate slow click fires the long press instead of the click.
+   *  Defaults to false, so touch-first consumers are unaffected. */
+  ignoreMouse?: boolean;
+}
+
 export interface UseLongPressResult {
   bind: LongPressBindings;
   /** Returns true exactly once after a long-press fired — call from your
@@ -27,7 +36,12 @@ export interface UseLongPressResult {
  */
 export function useLongPress(
   handler: (x: number, y: number) => void,
+  options: UseLongPressOptions = {},
 ): UseLongPressResult {
+  // Read off the option rather than depending on `options`: the caller
+  // passes a fresh object literal every render, and depending on it
+  // would give every binding a new identity each time.
+  const ignoreMouse = options.ignoreMouse === true;
   const timerRef = useRef<number | null>(null);
   const startRef = useRef({ x: 0, y: 0 });
   const firedRef = useRef(false);
@@ -45,8 +59,12 @@ export function useLongPress(
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLElement>) => {
-      // Mouse: only left-button. Touch/pen always pass through.
-      if (e.pointerType === "mouse" && e.button !== 0) return;
+      // Mouse: opt-out entirely, else left-button only. Touch/pen
+      // always pass through.
+      if (e.pointerType === "mouse") {
+        if (ignoreMouse) return;
+        if (e.button !== 0) return;
+      }
       firedRef.current = false;
       startRef.current = { x: e.clientX, y: e.clientY };
       cancel();
@@ -59,7 +77,7 @@ export function useLongPress(
         handlerRef.current(x, y);
       }, LONG_PRESS_MS);
     },
-    [cancel],
+    [cancel, ignoreMouse],
   );
 
   const onPointerMove = useCallback(
