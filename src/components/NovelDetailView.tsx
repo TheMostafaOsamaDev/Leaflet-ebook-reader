@@ -2699,7 +2699,30 @@ function VolumesAccordion({
             open={volumeMenu !== null}
             anchor={volumeMenu ? { x: volumeMenu.x, y: volumeMenu.y } : null}
             title={vol?.title ?? ""}
-            subtitle={tr("novel.chapterCountShort", { n: downloaded.length })}
+            // Not novel.chapterCountShort ("{n} ch."): a 200-chapter
+            // volume with 12 downloads rendered "12 ch." under its own
+            // title, which reads as the volume's size rather than its
+            // download count. Wrong in both languages.
+            subtitle={
+              all.length > 0
+                ? tr("downloads.delete.downloadedCount", {
+                    n: downloaded.length,
+                  })
+                : ""
+            }
+            // Say why, when both rows come up disabled. A lazy-volume
+            // source hands us chapters: [] until the volume is expanded
+            // in this session, so "nothing downloaded" and "we haven't
+            // looked yet" are different states and only one of them is
+            // the user's problem to fix. Loading the volume from here
+            // is deliberately deferred.
+            note={
+              all.length === 0
+                ? tr("downloads.delete.volumeNotLoaded")
+                : downloaded.length === 0
+                  ? tr("downloads.delete.nothingToDelete")
+                  : undefined
+            }
             actions={[
               {
                 id: "delete-read",

@@ -25,14 +25,20 @@ interface Props {
   /** Viewport coords of the trigger. Desktop only; ignored on mobile. */
   anchor: { x: number; y: number } | null;
   title: string;
+  /** Mobile sheet header only — the desktop popover has no header.
+   *  Rendered only when non-empty. */
   subtitle: string;
   actions: VolumeAction[];
+  /** Why the destructive rows are unavailable, when they are. Rendered
+   *  with the rows so BOTH layouts get it; two silently greyed rows
+   *  with no reason is the state this exists to prevent. */
+  note?: string;
   onPick: (id: VolumeAction["id"]) => void;
   onClose: () => void;
 }
 
 export function VolumeActionsMenu({
-  theme, layout, open, anchor, title, subtitle, actions, onPick, onClose,
+  theme, layout, open, anchor, title, subtitle, actions, note, onPick, onClose,
 }: Props) {
   const rows = (
     <div style={{ fontFamily: FONT_STACKS.sans }}>
@@ -74,6 +80,26 @@ export function VolumeActionsMenu({
           <span>{a.label}</span>
         </button>
       ))}
+      {note && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            paddingBlock: "6px 8px",
+            paddingInline: 12,
+            fontSize: 11.5,
+            lineHeight: 1.4,
+            color: theme.muted,
+          }}
+        >
+          <Icon
+            name="info"
+            size={13}
+            style={{ flexShrink: 0, marginBlockStart: 1 }}
+          />
+          <span>{note}</span>
+        </div>
+      )}
     </div>
   );
 
@@ -91,7 +117,9 @@ export function VolumeActionsMenu({
         <div style={{ paddingBlock: "4px 16px", paddingInline: 8 }}>
           <div style={{ paddingBlock: "0 12px", paddingInline: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
-            <div style={{ fontSize: 12, color: theme.muted }}>{subtitle}</div>
+            {subtitle && (
+              <div style={{ fontSize: 12, color: theme.muted }}>{subtitle}</div>
+            )}
           </div>
           {rows}
         </div>
@@ -99,7 +127,9 @@ export function VolumeActionsMenu({
     );
   }
 
-  return <DesktopPopover {...{ theme, open, anchor, onClose }}>{rows}</DesktopPopover>;
+  return (
+    <DesktopPopover {...{ theme, open, anchor, onClose }}>{rows}</DesktopPopover>
+  );
 }
 
 function DesktopPopover({
