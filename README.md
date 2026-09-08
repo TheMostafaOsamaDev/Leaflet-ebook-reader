@@ -122,6 +122,24 @@ everything else.
 
 ![Download queue](docs/screenshots/desktop/13-downloads.png)
 
+### 🗑️ …and downloads you can take back
+
+Reclaim the disk without losing your place. Hover a downloaded chapter and its marker turns
+into a delete button — one click, and a toast offers the download straight back. For a
+bigger clear-out a volume will drop just the chapters you have already read, or all of them;
+or long-press (right-click on desktop) any chapter to start selecting a run of them and
+delete the lot in one go. Deleting only ever removes the file: the chapter stays in the list,
+still readable online, and your reading progress is left alone.
+
+![Deleting one chapter's download from its row](docs/screenshots/desktop/22-delete-row.png)
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/desktop/23-delete-selection.png" alt="Several chapters selected for deletion at once"/></td>
+<td width="50%"><img src="docs/screenshots/desktop/24-delete-volume-menu.png" alt="A volume offering to delete read downloads or all of them"/></td>
+</tr>
+</table>
+
 ### 📄 PDF and Word, not just EPUB
 
 PDFs render through pdf.js with their own page controls — fit to width or page, scroll or
