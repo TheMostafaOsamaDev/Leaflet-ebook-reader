@@ -596,16 +596,6 @@ input:focus-visible,
     forwards;
 }
 
-/* Mobile tap-zone preview: a transparent tinted strip on each side
-   that fades in, holds, then fades out over ~3s so the user can see
-   how wide the new tap zones are when they adjust the width slider. */
-@keyframes riwaq-zone-flash {
-  0%   { opacity: 0; }
-  6%   { opacity: 0.18; }
-  55%  { opacity: 0.18; }
-  100% { opacity: 0; }
-}
-
 /* Skeleton shimmer. Used by the Store's loading placeholders — the
    gradient sweeps across to give the user a sense of progress while the
    real content is being fetched. Colors live on the element via

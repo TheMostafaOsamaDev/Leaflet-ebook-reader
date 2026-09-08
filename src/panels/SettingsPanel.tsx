@@ -96,7 +96,6 @@ export function SettingsPanel(props: Props) {
           theme={theme}
           t={t}
           setTweak={setTweak}
-          mobile={mobile}
           showPageTurn={!mobile}
         />
       )}

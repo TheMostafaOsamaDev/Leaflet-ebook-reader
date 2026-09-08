@@ -503,17 +503,16 @@ export function ThemeField({
 
 /** The reading typography/layout controls as individually-searchable entries,
  *  shared by the reader quick-panel and the Settings page's Reading section.
- *  `mobile` surfaces the tap-to-turn controls; `showPageTurn` surfaces the
- *  page-flip toggle (desktop paginated only — mobile is scroll-only). */
+ *  `showPageTurn` surfaces the page-flip toggle (desktop paginated only —
+ *  mobile is scroll-only). */
 export function readingItems(ctx: {
   theme: Theme;
   t: Tweaks;
   setTweak: SetTweak;
   tr: Tr;
-  mobile: boolean;
   showPageTurn: boolean;
 }): SettingEntry[] {
-  const { theme, t, setTweak, tr, mobile, showPageTurn } = ctx;
+  const { theme, t, setTweak, tr, showPageTurn } = ctx;
   const onOff = (
     id: string,
     label: string,
@@ -653,13 +652,6 @@ export function readingItems(ctx: {
   }
   items.push(onOff("keepScreenAwake", tr("settings.keepScreenAwake"), t.keepScreenAwake, (on) => setTweak("keepScreenAwake", on), tr("settings.keepScreenAwake.hint")));
 
-  if (mobile) {
-    items.push(onOff("tapToTurn", tr("settings.tapToTurn"), t.mobileTapNav, (on) => setTweak("mobileTapNav", on)));
-    if (t.mobileTapNav) {
-      items.push(slider("tapZoneWidth", tr("settings.tapZoneWidth", { n: t.mobileTapZoneWidth }), 10, 45, 1, t.mobileTapZoneWidth, (n) => setTweak("mobileTapZoneWidth", n)));
-      items.push(slider("tapStride", tr("settings.tapStride", { n: t.mobileTapStride }), 30, 100, 5, t.mobileTapStride, (n) => setTweak("mobileTapStride", n)));
-    }
-  }
   return items;
 }
 
@@ -668,17 +660,15 @@ export function ReadingControls({
   theme,
   t,
   setTweak,
-  mobile = false,
   showPageTurn = true,
 }: {
   theme: Theme;
   t: Tweaks;
   setTweak: SetTweak;
-  mobile?: boolean;
   showPageTurn?: boolean;
 }) {
   const { tr } = useI18n();
-  return <>{renderEntries(readingItems({ theme, t, setTweak, tr, mobile, showPageTurn }))}</>;
+  return <>{renderEntries(readingItems({ theme, t, setTweak, tr, showPageTurn }))}</>;
 }
 
 /** Zoom stepper button. Sized to the platform's touch minimum on mobile

@@ -44,11 +44,8 @@ export const ar: Messages = {
   "settings.mode.paginated2": "صفحتان",
   "settings.mode.paginated1": "صفحة واحدة",
   "settings.mode.scroll": "تمرير",
-  "settings.tapToTurn": "انقر لتقليب الصفحات",
   "settings.on": "تشغيل",
   "settings.off": "إيقاف",
-  "settings.tapZoneWidth": "عرض منطقة النقر · {n}٪",
-  "settings.tapStride": "مسافة تمرير النقرة · {n}٪",
 
   "settings.subtitle.fixed": "المظهر وتخطيط الصفحة",
   "settings.flow": "طريقة العرض",

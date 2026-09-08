@@ -56,11 +56,8 @@ export const en = {
   "settings.mode.paginated2": "Two pages",
   "settings.mode.paginated1": "Single page",
   "settings.mode.scroll": "Scroll",
-  "settings.tapToTurn": "Tap to turn pages",
   "settings.on": "On",
   "settings.off": "Off",
-  "settings.tapZoneWidth": "Tap zone width · {n}%",
-  "settings.tapStride": "Tap scroll length · {n}%",
 
   // fixed-layout (PDF / DOCX) page controls. These live beside the reflow
   // controls above because both readers render them through the same

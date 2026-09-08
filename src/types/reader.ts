@@ -51,19 +51,6 @@ export interface Tweaks {
       letting the user shrink or expand the text column to match their
       screen. */
   contentWidth: number;
-  /** Mobile only — tap the right edge of the book to scroll forward a
-      page-worth, the left edge to scroll back. The center third still
-      toggles the reader chrome. Ignored on desktop. */
-  mobileTapNav: boolean;
-  /** Mobile only — width of each side tap zone as a percentage of the
-      reader width (10–45). The two zones are mirrored, so the inert
-      center band that toggles the chrome is `100 − 2 × width` percent.
-      Only consulted when `mobileTapNav` is on. */
-  mobileTapZoneWidth: number;
-  /** Mobile only — how far one tap scrolls, as a percentage of the
-      reader's visible height (30–100). Only consulted when
-      `mobileTapNav` is on. */
-  mobileTapStride: number;
   /** Selectable UI font for the app chrome. Resolved to a concrete font
       stack via UI_FONT_STACKS and applied through the `--ui-font` CSS var. */
   uiFont: UiFontKey;
