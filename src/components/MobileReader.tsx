@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 import { BookBody, readingGutter } from "./BookBody";
@@ -12,6 +13,7 @@ import {
 import { MobileSheet } from "./MobileSheet";
 import { MAX_TICKS, ReaderProgressBar } from "../reader/chrome/ReaderProgressBar";
 import { ReaderTabBar } from "../reader/chrome/ReaderTabBar";
+import { glassBar } from "../reader/chrome/glass";
 import { SelectionPopover } from "./SelectionPopover";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { SelectionHandle } from "./SelectionHandle";
@@ -266,12 +268,37 @@ export function MobileReader({
   const chromeTransition = reduced
     ? "none"
     : `transform ${MOTION.med}ms ${EASE.enter}, opacity ${MOTION.med}ms ${EASE.enter}`;
-  const [sheet, setSheet] = useState<ActivePanel>(null);
+  const glassTop = glassBar(theme, "top");
+  const glassBottom = glassBar(theme, "bottom");
+
+  // Android full screen. The app draws edge-to-edge, so hiding the reader's
+  // own bars used to leave the SYSTEM bars painted over the page — the clock
+  // and battery icons sat on the first line, with the text running under them.
+  // The system bars now go with the chrome. They come back on an edge swipe
+  // (transient) or the moment the chrome is tapped back in.
+  //
+  // Rejects and no-ops everywhere but Android, so no platform check is needed.
+  useEffect(() => {
+    void invoke("set_immersive_mode", { immersive: !showChrome }).catch(
+      () => {},
+    );
+  }, [showChrome]);
+  // Leaving the reader always restores them, whatever state the chrome was in.
+  // Kept apart from the effect above deliberately: as that one's cleanup it
+  // would fire on every toggle, showing the bars again a frame after each
+  // request to hide them. Mount-only, so it runs on unmount and nowhere else.
+  useEffect(
+    () => () => {
+      void invoke("set_immersive_mode", { immersive: false }).catch(() => {});
+    },
+    [],
+  );
   // Bumping this remounts the tap-zone preview overlays so the CSS
   // keyframe animation restarts. The 3s timer below resets it to 0,
   // unmounting the divs (otherwise they'd sit as opacity-0 elements).
   const [zoneFlash, setZoneFlash] = useState(0);
   const isFirstZoneRender = useRef(true);
+  const [sheet, setSheet] = useState<ActivePanel>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
   const startEndpointRef = useRef<RangeEndpoint | null>(null);
@@ -812,6 +839,7 @@ export function MobileReader({
           pointer events so taps fall through to the reader. */}
       <div
         ref={chromeRef}
+        className={glassTop.className}
         aria-hidden={chromeHidden}
         style={{
           position: "absolute",
@@ -823,7 +851,10 @@ export function MobileReader({
           display: "flex",
           alignItems: "center",
           gap: 8,
-          background: theme.chrome,
+          // Frosted, so the paragraph passing under the bar stays visible
+          // instead of being clipped off by an opaque strip — see
+          // reader/chrome/glass.ts.
+          ...glassTop.style,
           transform: chromeHidden ? "translateY(-100%)" : "translateY(0)",
           opacity: chromeHidden ? 0 : 1,
           transition: chromeTransition,
@@ -967,6 +998,7 @@ export function MobileReader({
       {/* Bottom chrome — same always-mounted pattern as the top bar.
           Slides down off-screen when hidden and gives up pointer events. */}
       <div
+        className={glassBottom.className}
         aria-hidden={chromeHidden}
         style={{
           position: "absolute",
@@ -976,7 +1008,7 @@ export function MobileReader({
           zIndex: 10,
           padding: "14px 20px calc(env(safe-area-inset-bottom, 0px) + 16px)",
           color: theme.chromeInk,
-          background: theme.chrome,
+          ...glassBottom.style,
           transform: chromeHidden ? "translateY(100%)" : "translateY(0)",
           opacity: chromeHidden ? 0 : 1,
           transition: chromeTransition,

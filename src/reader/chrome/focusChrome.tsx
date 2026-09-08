@@ -21,10 +21,29 @@ import {
 import { EASE, MOTION } from "../../styles/motion";
 import { FONT_STACKS, type Theme } from "../../styles/tokens";
 import { chromeEdges } from "./focusEdges";
+import { glassBar, type GlassBar, type GlassEdge } from "./glass";
 import { migrateStorageKey } from "../../lib/legacyStorage";
 
 /** How long a revealed bar lingers after the pointer leaves its edge, in ms. */
 const CHROME_LINGER_MS = 450;
+
+// Room a pinned reader bar occupies, for the reading surface to pad itself
+// clear of. Constants rather than a measured height, following what the phone
+// reader already does with its flat 44px: the chrome font is fixed (see the
+// note on FONT_STACKS.sans) so these do not move, and measuring would mean the
+// padding jumps from 0 to its real value one frame after mount — which lands
+// right on top of the restored scroll position.
+//
+// Being a few pixels out costs nothing here: the numbers set how much
+// whitespace sits between a bar and the first line, so an inexact one reads as
+// 58px of breathing room instead of 60px. The failure mode if a bar ever grows
+// taller than its constant is a line tucked under a TRANSLUCENT bar — blurred
+// but still legible — not a line that vanishes.
+//
+/** Height of the top bar (ReaderTopBar: 14px padding + a 37px title block). */
+export const CHROME_INSET_TOP = 66;
+/** Height of the bottom bar (ReaderProgressBar: 6px + a 44px track + 14px). */
+export const CHROME_INSET_BOTTOM = 65;
 /** How long the first-run hint stays up. Matches `.riwaq-focus-hint`. */
 export const FOCUS_HINT_MS = 3200;
 /** Set once the first-run focus-mode hint has been shown. */
@@ -80,10 +99,18 @@ export interface FocusChrome {
     onMouseMove: (e: ReactMouseEvent) => void;
     onMouseLeave: () => void;
   };
+  /** Pins a bar to one edge, floating over the page, for when focus mode is
+   *  OFF. Same overlay position as `clip` but with no slide to contain, so it
+   *  omits the `overflow: hidden` — see the note on the implementation. */
+  pin: (edge: GlassEdge) => CSSProperties;
   /** Outer clip window for one edge — see the note on the implementation. */
   clip: (edge: "top" | "bottom", shown: boolean) => CSSProperties;
   /** Inner sliding layer for one edge. */
   slide: (edge: "top" | "bottom", shown: boolean) => CSSProperties;
+  /** The frosted fill for a bar on one edge. Handed out from here so a reader
+   *  gets the bar's material and its float behaviour from the same place, and
+   *  so the two stay in step whether focus mode is on or off. */
+  glass: (edge: GlassEdge) => GlassBar;
 }
 
 export function useFocusChrome({
@@ -201,11 +228,15 @@ export function useFocusChrome({
     return () => document.removeEventListener("keydown", onKey);
   }, [floating, panelOpen, setActive]);
 
+  // Transform only — see the note on `slide` for why the opacity fade went.
   const chromeTransition = reducedMotion
     ? "none"
-    : `transform ${MOTION.med}ms ${EASE.enter}, opacity ${MOTION.med}ms ${EASE.enter}`;
+    : `transform ${MOTION.med}ms ${EASE.enter}`;
 
-  // Chrome that floats over the page, in two layers.
+  // Chrome that floats over the page. Both readers keep their bars over the
+  // page whether or not focus mode is on — that is what makes them read like
+  // the phone reader's, with the paragraph blurring through them as it scrolls
+  // past. `pin` is the plain case; focus mode adds the two layers below.
   //
   // The OUTER layer is a fixed window at the edge, `overflow: hidden`, sized by
   // the bar inside it. It exists because a transformed box still counts toward
@@ -229,33 +260,58 @@ export function useFocusChrome({
   // the bar there. The control was unreachable until you moved away and
   // waited. `insetInlineStart` is logical, so this lands on whichever edge the
   // strip is on and needs no separate RTL case.
-  const clip = (edge: "top" | "bottom", shown: boolean): CSSProperties => ({
+  //
+  // Where a floating bar sits, shared by both modes.
+  const overlay = (edge: GlassEdge): CSSProperties => ({
     position: "absolute",
     [edge]: 0,
     insetInlineStart: dockInset,
     insetInlineEnd: 0,
-    overflow: "hidden",
     // Above SideSheet's overlay (40) so a revealed bar is never dimmed by, or
     // buried under, a panel's scrim; below the toasts at 50.
     zIndex: 45,
-    visibility: shown ? "visible" : "hidden",
-    pointerEvents: shown ? "auto" : "none",
-    transition: reducedMotion
-      ? "none"
-      : `visibility 0s linear ${shown ? "0s" : `${MOTION.med}ms`}`,
     // Chrome is never part of a text selection dragged across the page.
     userSelect: "none",
     WebkitUserSelect: "none",
   });
 
+  // Focus mode OFF: the bar is simply pinned over the page. Deliberately NOT
+  // `clip(edge, true)`, which would look equivalent — `clip` brings its
+  // `overflow: hidden` along, and the progress bar's scrub chip is anchored
+  // `calc(100% + 12px)` above its 3px track, i.e. outside the bar's own box.
+  // Clipping here would lop the value off the chip mid-drag.
+  const pin = (edge: GlassEdge): CSSProperties => overlay(edge);
+
+  const clip = (edge: "top" | "bottom", shown: boolean): CSSProperties => ({
+    ...overlay(edge),
+    overflow: "hidden",
+    visibility: shown ? "visible" : "hidden",
+    pointerEvents: shown ? "auto" : "none",
+    transition: reducedMotion
+      ? "none"
+      : `visibility 0s linear ${shown ? "0s" : `${MOTION.med}ms`}`,
+  });
+
   // The INNER layer is what actually moves.
+  //
+  // Transform only — no opacity, and no background of its own. Both were here
+  // before the chrome went frosted and both now break it:
+  //
+  // - An ancestor with `opacity` < 1 becomes a "backdrop root", and
+  //   `backdrop-filter` inside one has nothing left to sample. Fading this
+  //   layer meant the bar's blur cut out for the length of the animation and
+  //   then popped back in the frame opacity reached exactly 1. The fade was
+  //   only ever a nicety: the clip window above is `overflow: hidden`, so the
+  //   translate alone takes the bar out of sight.
+  // - An opaque `background` here would sit behind the bar's own translucent
+  //   fill and composite the two to ~0.95 alpha, i.e. no frost at all.
+  //
+  // The bar inside paints its own glass — see reader/chrome/glass.ts.
   const slide = (edge: "top" | "bottom", shown: boolean): CSSProperties => ({
     transform: shown
       ? "translateY(0)"
       : `translateY(${edge === "top" ? "-100%" : "100%"})`,
-    opacity: shown ? 1 : 0,
     transition: chromeTransition,
-    background: theme.bg,
   });
 
   return {
@@ -292,8 +348,10 @@ export function useFocusChrome({
         }
       },
     },
+    pin,
     clip,
     slide,
+    glass: (edge) => glassBar(theme, edge),
   };
 }
 

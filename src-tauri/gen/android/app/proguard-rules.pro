@@ -42,6 +42,7 @@
 # method, the JNI lookup throws, and the process aborts on the next JNI call.
 -keepclassmembers class com.leaflet.reader.MainActivity {
     public static void setBarAppearance(android.app.Activity, boolean, int);
+    public static void setImmersiveMode(android.app.Activity, boolean);
     static java.lang.String pendingLaunchIntent;
     static java.lang.String pendingOpenUri;
 }

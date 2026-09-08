@@ -53,7 +53,12 @@ import { ReaderProgressBar } from "../chrome/ReaderProgressBar";
 import { ReaderTabBar } from "../chrome/ReaderTabBar";
 import { ReaderIconButton } from "../chrome/ReaderIconButton";
 import { SettingsPanel } from "../../panels/SettingsPanel";
-import { FocusHint, useFocusChrome } from "../chrome/focusChrome";
+import {
+  CHROME_INSET_BOTTOM,
+  CHROME_INSET_TOP,
+  FocusHint,
+  useFocusChrome,
+} from "../chrome/focusChrome";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { DOCK_QUERY, DOCK_WIDTH, shouldDockContents } from "../chrome/dockContents";
 import { useI18n } from "../../i18n/useI18n";
@@ -184,6 +189,31 @@ export function FixedPageReader(props: FixedPageReaderProps) {
     // A docked Contents panel keeps the floating bars off its own header.
     dockInset: tocDocked ? DOCK_WIDTH : 0,
   });
+  const glassBottom = focus.glass("bottom");
+
+  // How much room the two floating bars take, for the page area to inset
+  // itself by. Unlike the reflow reader — where text simply scrolls under the
+  // bars — a fitted page has to sit BETWEEN them: at `fit: "page"` the sheet
+  // is sized to the space it is given, so anything not reserved here is page
+  // that ends up behind a bar with no way to scroll it out.
+  //
+  // The top bar's own padding carries `env(safe-area-inset-top)`, so this
+  // does too — an Android tablet in landscape reports `isMobile === false`
+  // and runs this reader's desktop branch with a real notch (see App.tsx).
+  const padTop = `calc(${CHROME_INSET_TOP}px + env(safe-area-inset-top, 0px))`;
+  // The phone's bottom bar stacks: 8px of its own padding, the scrubber row
+  // when it is showing (a 44px track plus its 6px tail), the 44px tab row,
+  // then 6px above the gesture bar. Desktop shows the scrubber alone.
+  const padBottom = isMobile
+    ? `calc(${8 + (showProgress ? 50 : 0) + 44 + 6}px + env(safe-area-inset-bottom, 0px))`
+    : `${CHROME_INSET_BOTTOM}px`;
+  // Where the floating bars sit relative to an open panel, which differs by
+  // platform because the panels do. Desktop keeps `pin`'s default 45, above
+  // SideSheet's scrim — that is what leaves a revealed bar undimmed with its
+  // buttons still clickable. A phone raises MobileSheet (zIndex 20) instead,
+  // which is meant to cover the chrome the way it does in the reflow reader
+  // (whose bars sit at 10), so the bars go under it.
+  const barLayer = isMobile ? { zIndex: 10 } : null;
 
   // Content/page-flip direction: DOCX carries its own; PDF follows the UI.
   const contentDir = book.kind === "docx" ? book.dir : uiDir;
@@ -414,12 +444,15 @@ export function FixedPageReader(props: FixedPageReaderProps) {
         flexDirection: "column",
       }}
     >
-      {/* top chrome — shared with the reflow reader. The wrapper carries the
-          focus-mode float; out of focus mode it adds nothing but a flex row,
-          so the bar sits in the layout as before. */}
+      {/* top chrome — shared with the reflow reader. It floats over the page
+          in both modes so it reads like the phone reader's; focus mode adds
+          the clip window that lets it slide away, out of focus mode it is
+          simply pinned. The page area insets itself by `padTop` either way. */}
       <div
         style={
-          focus.floating ? focus.clip("top", focus.showTop) : { flexShrink: 0 }
+          focus.floating
+            ? focus.clip("top", focus.showTop)
+            : { ...focus.pin("top"), ...barLayer }
         }
       >
         <div
@@ -500,6 +533,11 @@ export function FixedPageReader(props: FixedPageReaderProps) {
             open={panel !== null}
             onClose={closePanel}
             dock={tocDocked}
+            // Same reasoning as the reflow reader: clear of the pinned bars,
+            // full height in focus mode where they start hidden.
+            chromeInset={
+              focus.floating ? undefined : { top: padTop, bottom: padBottom }
+            }
             side={panel === "settings" || panel === "progress" ? "right" : "left"}
             label={panelLabel}
           >
@@ -511,7 +549,24 @@ export function FixedPageReader(props: FixedPageReaderProps) {
             layer, so it fills whatever width is left once Contents has taken
             its strip. */}
         <div
-          style={{ flex: 1, position: "relative", minHeight: 0, minWidth: 0 }}
+          // MARGINS, not padding. The viewer's scroll layer is `position:
+          // absolute; inset: 0`, and an absolutely positioned box resolves its
+          // offsets against its containing block's PADDING box — which
+          // includes the padding. Padding here therefore left the page
+          // full-bleed under both bars (measured: the layer's rect stayed
+          // identical to this element's), so at `fit: "page"` the head and
+          // foot of every page sat behind a bar with no way to scroll them
+          // out. Margins shrink this element's own box instead, which is what
+          // the `inset: 0` then lands inside — and the viewer's fit/zoom maths
+          // needs no changes, since it measures this container.
+          style={{
+            flex: 1,
+            position: "relative",
+            minHeight: 0,
+            minWidth: 0,
+            marginTop: padTop,
+            marginBottom: padBottom,
+          }}
         >
           {source ? (
             <FixedPageViewer
@@ -576,12 +631,13 @@ export function FixedPageReader(props: FixedPageReaderProps) {
           tabs up top, where there is room and no thumb involved. */}
       {isMobile ? (
         <div
+          className={glassBottom.className}
           style={{
-            background: theme.chrome,
-            borderTop: `0.5px solid ${theme.ruleStrong}`,
+            ...focus.pin("bottom"),
+            ...barLayer,
+            ...glassBottom.style,
             color: theme.chromeInk,
             padding: "8px 14px calc(env(safe-area-inset-bottom, 0px) + 6px)",
-            flexShrink: 0,
           }}
         >
           {showProgress && progressBar}
@@ -598,18 +654,21 @@ export function FixedPageReader(props: FixedPageReaderProps) {
           style={
             focus.floating
               ? focus.clip("bottom", focus.showBottom)
-              : { flexShrink: 0 }
+              : focus.pin("bottom")
           }
         >
           <div
-            style={
-              focus.floating
-                ? {
-                    ...focus.slide("bottom", focus.showBottom),
-                    borderTop: `0.5px solid ${theme.rule}`,
-                  }
-                : undefined
-            }
+            // The glass sits here, not on ReaderProgressBar: that component is
+            // also used inside the phone bar above and in the panels, where it
+            // is not the floating surface. `backdrop-filter` has to be on the
+            // element carrying the fill, so the two stay together.
+            className={glassBottom.className}
+            style={{
+              ...glassBottom.style,
+              ...(focus.floating
+                ? focus.slide("bottom", focus.showBottom)
+                : null),
+            }}
           >
             {progressBar}
           </div>

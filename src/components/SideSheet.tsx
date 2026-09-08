@@ -27,8 +27,12 @@
 // edge rather than sweeping across the reader under RTL.
 //
 // The sheet fills its positioning parent (`position: absolute; inset: 0`), so
-// mount it inside the reader's *content* region (below the chrome) — that keeps
-// the chrome bar and its toggle buttons above the scrim and fully clickable.
+// mount it inside the reader's *content* region. Both readers now float their
+// chrome bars over that region rather than stacking them above it, so an
+// overlay panel takes `chromeInset` to stay clear of them — the bars sit at a
+// higher z-index and would otherwise cover the panel's own header. The bars
+// being above the scrim is deliberate: their toggle buttons stay clickable and
+// undimmed while a panel is open.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n/useI18n";
@@ -52,6 +56,13 @@ interface Props {
   label?: string;
   /** Base stacking level; the panel sits one above the scrim. Default 40. */
   zIndex?: number;
+  /** Room to leave at the top/bottom of an OVERLAY panel, for a reader whose
+   *  chrome bars float over the content region rather than sitting above it.
+   *  Without it the panel spans the full height and its own header — the close
+   *  button included — ends up underneath the top bar, which is stacked above
+   *  it. Ignored while docked: a docked panel is meant to run the full height,
+   *  and the bars stop short of it instead (see focusChrome's `dockInset`). */
+  chromeInset?: { top?: number | string; bottom?: number | string };
 }
 
 export function SideSheet({
@@ -64,6 +75,7 @@ export function SideSheet({
   dock = false,
   label,
   zIndex = 40,
+  chromeInset,
 }: Props) {
   const { dir } = useI18n();
   const reduced = useReducedMotion();
@@ -244,8 +256,8 @@ export function SideSheet({
         tabIndex={-1}
         style={{
           position: "absolute",
-          top: 0,
-          bottom: 0,
+          top: chromeInset?.top ?? 0,
+          bottom: chromeInset?.bottom ?? 0,
           ...anchor,
           ...(width != null ? { width } : null),
           maxWidth: "100%",

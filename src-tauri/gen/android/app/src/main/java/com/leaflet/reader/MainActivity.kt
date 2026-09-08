@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.ActionMode
 import android.view.Window
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : TauriActivity() {
@@ -210,6 +211,45 @@ class MainActivity : TauriActivity() {
                 // (= light icons for a dark background) flag.
                 controller.isAppearanceLightStatusBars = !lightIcons
                 controller.isAppearanceLightNavigationBars = !lightIcons
+            }
+        }
+
+        /** Hide or restore the status and navigation bars, for the reader's
+         *  full-screen mode. Called via JNI from Rust's `set_immersive_mode`
+         *  whenever the reader's own chrome is tapped away.
+         *
+         *  The app draws edge-to-edge (see `enableEdgeToEdge` in onCreate), so
+         *  before this existed the system bars stayed painted over a reader
+         *  that had already hidden its own: tapping into full screen left the
+         *  clock and battery icons sitting on top of the first line of the
+         *  page, with the text running underneath them.
+         *
+         *  BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE is what keeps this from being
+         *  a trap — the bars come back for a few seconds on an edge swipe, so
+         *  the clock and the back gesture are always one swipe away, and they
+         *  retreat again on their own without disturbing the page.
+         *
+         *  Must touch the window on the UI thread: JNI calls arrive on an
+         *  attached Rust thread. Same reasoning as setBarAppearance above.
+         *
+         *  `@JvmStatic` so JNI sees a static method with a stable signature:
+         *  (Landroid/app/Activity;Z)V. The descriptor here, the one in
+         *  notify.rs and the -keep rule in proguard-rules.pro have to agree —
+         *  see the note on setBarAppearance. */
+        @JvmStatic
+        fun setImmersiveMode(activity: Activity, immersive: Boolean) {
+            activity.runOnUiThread {
+                val window = activity.window
+                val controller =
+                    WindowInsetsControllerCompat(window, window.decorView)
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat
+                        .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                if (immersive) {
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                } else {
+                    controller.show(WindowInsetsCompat.Type.systemBars())
+                }
             }
         }
     }

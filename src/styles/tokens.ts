@@ -25,6 +25,18 @@ export interface Theme {
    *  Same hue family as `rule`, ~1.6× the alpha. */
   ruleStrong: string;
   chrome: string;
+  /** Translucent `chrome`, for reader bars that float over the page and blur
+   *  it (see reader/chrome/glass.ts). Alpha is deliberately high — 0.78-0.80
+   *  rather than the ~0.6 a "glass" panel usually gets — because the thing
+   *  behind these bars is body text, and the 10px subtitle in the top bar has
+   *  to stay legible over the brightest patch of it. At 0.78 with a 24px blur
+   *  the effective backdrop of a text page lands around 4.8:1 for `muted`,
+   *  which clears AA; dropping much lower does not.
+   *
+   *  Only for surfaces that actually carry `backdrop-filter`. Without the blur
+   *  this is just a washed-out `chrome` with the raw text showing through it —
+   *  use `chrome` for anything opaque. */
+  chromeGlass: string;
   chromeInk: string;
   /** Translucent overlay tint for hover/press on surfaces whose base
    *  background is TRANSPARENT (e.g. list rows). Do NOT use it to replace an
@@ -65,6 +77,7 @@ export const THEMES: Record<ThemeKey, Theme> = {
     rule: "rgba(58,47,31,0.14)",
     ruleStrong: "rgba(58,47,31,0.22)",
     chrome: "#ebe0c5",
+    chromeGlass: "rgba(235,224,197,0.78)",
     chromeInk: "#5a4a2e",
     hover: "rgba(58,47,31,0.06)",
     chromeHover: "#e0d3b2",
@@ -80,6 +93,7 @@ export const THEMES: Record<ThemeKey, Theme> = {
     rule: "rgba(31,26,20,0.10)",
     ruleStrong: "rgba(31,26,20,0.18)",
     chrome: "#f0ece2",
+    chromeGlass: "rgba(240,236,226,0.78)",
     chromeInk: "#3a332a",
     hover: "rgba(31,26,20,0.05)",
     chromeHover: "#e5ded0",
@@ -96,6 +110,7 @@ export const THEMES: Record<ThemeKey, Theme> = {
     rule: "rgba(216,203,176,0.14)",
     ruleStrong: "rgba(216,203,176,0.22)",
     chrome: "#24201c",
+    chromeGlass: "rgba(36,32,28,0.78)",
     chromeInk: "#c4b89c",
     hover: "rgba(216,203,176,0.06)",
     chromeHover: "#322d27",
@@ -112,6 +127,7 @@ export const THEMES: Record<ThemeKey, Theme> = {
     rule: "rgba(184,173,148,0.10)",
     ruleStrong: "rgba(184,173,148,0.18)",
     chrome: "#0c0a08",
+    chromeGlass: "rgba(12,10,8,0.82)",
     chromeInk: "#a89d84",
     hover: "rgba(184,173,148,0.05)",
     chromeHover: "#211d17",

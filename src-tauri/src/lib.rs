@@ -63,6 +63,7 @@ pub fn run() {
             sources::source_session_fetch,
             notify::update_download_notification,
             notify::set_status_bar_style,
+            notify::set_immersive_mode,
             notify::consume_launch_intent,
             notify::consume_open_uri,
             notify::start_task_service,
