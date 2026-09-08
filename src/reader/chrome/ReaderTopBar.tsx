@@ -11,6 +11,7 @@ import type { CSSProperties, ReactNode, RefObject } from "react";
 import { FONT_STACKS, type Theme } from "../../styles/tokens";
 import { fractionToWidth } from "../../components/readerProgress";
 import { ReaderIconButton } from "./ReaderIconButton";
+import { glassBar } from "./glass";
 import type { IconProps } from "../../components/Icon";
 
 interface Props {
@@ -50,8 +51,18 @@ export function ReaderTopBar({
   progressFraction,
   fillRtl = false,
 }: Props) {
+  // The bar floats over the page in both readers, so it carries the frosted
+  // fill (and the hairline that keeps it from dissolving into the paragraph
+  // underneath) rather than an opaque one — see reader/chrome/glass.ts.
+  //
+  // The `backdrop-filter` lives on THIS element, not on a wrapper: an ancestor
+  // with `opacity` < 1 becomes a backdrop root and the blur inside it has
+  // nothing to sample, which is why focus mode's sliding layer no longer
+  // fades.
+  const glass = glassBar(theme, "top");
   return (
     <div
+      className={glass.className}
       style={{
         position: "relative",
         display: "flex",
@@ -62,8 +73,7 @@ export function ReaderTopBar({
         // under the system clock and can't be tapped. Resolves to a plain
         // 14px on desktop, where the inset is 0.
         padding: "calc(14px + env(safe-area-inset-top, 0px)) 22px 14px",
-        borderBottom: `0.5px solid ${theme.rule}`,
-        background: theme.bg,
+        ...glass.style,
         color: theme.chromeInk,
         fontFamily: FONT_STACKS.sans,
         flexShrink: 0,

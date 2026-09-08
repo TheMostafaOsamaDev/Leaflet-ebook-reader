@@ -596,16 +596,6 @@ input:focus-visible,
     forwards;
 }
 
-/* Mobile tap-zone preview: a transparent tinted strip on each side
-   that fades in, holds, then fades out over ~3s so the user can see
-   how wide the new tap zones are when they adjust the width slider. */
-@keyframes riwaq-zone-flash {
-  0%   { opacity: 0; }
-  6%   { opacity: 0.18; }
-  55%  { opacity: 0.18; }
-  100% { opacity: 0; }
-}
-
 /* Skeleton shimmer. Used by the Store's loading placeholders — the
    gradient sweeps across to give the user a sense of progress while the
    real content is being fetched. Colors live on the element via
@@ -839,4 +829,36 @@ input:focus-visible,
    outrank a class selector, so the upgrade has to say so. */
 .riwaq-clip-window {
   overflow: clip !important;
+}
+
+/* ─── Frosted reader chrome ────────────────────────────────────────────────
+   The reader's top and bottom bars float over the page and blur the text
+   passing under them. Built as a class rather than an inline style because
+   the fallback needs `@supports`, which inline styles cannot express.
+
+   The blur radius matters for legibility, not just looks: 24px is wide enough
+   that a body glyph under the bar smears into the page average instead of
+   staying a dark blob under the 10px subtitle. Dropping it to the 6-8px used
+   elsewhere in the app makes individual words readable THROUGH the bar and the
+   title starts fighting them for attention.
+
+   `saturate(180%)` is the iOS-material trick: a plain blur of a warm page
+   through a warm scrim reads muddy, and pushing saturation back up keeps the
+   sepia/dark themes' warmth instead of greying out.
+
+   Callers set `--riwaq-chrome-opaque` to the theme's solid `chrome` so the
+   no-backdrop-filter fallback below has something to land on. */
+.riwaq-chrome-glass {
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* No backdrop-filter (older Android WebView, blur disabled for power saving):
+   fall back to the opaque chrome fill. Without this the bar keeps its 0.78
+   alpha with the raw, unblurred text showing through it — the one genuinely
+   unreadable outcome. */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .riwaq-chrome-glass {
+    background: var(--riwaq-chrome-opaque, transparent) !important;
+  }
 }

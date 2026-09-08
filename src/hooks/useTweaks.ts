@@ -21,9 +21,6 @@ export const DEFAULT_TWEAKS: Tweaks = {
   readingMode: "paginated-2",
   focusMode: false,
   contentWidth: 100,
-  mobileTapNav: true,
-  mobileTapZoneWidth: 33,
-  mobileTapStride: 90,
   uiFont: "readex",
   paragraphSpacing: 1.1,
   hyphenation: false,
@@ -64,6 +61,14 @@ function load(): Tweaks {
     // strip it so the spread doesn't keep a stale field.
     if (parsed && typeof parsed === "object" && "pageWidth" in parsed) {
       delete parsed.pageWidth;
+    }
+    // Tap-to-turn is gone — the reading surface is scroll-only now, and a tap
+    // anywhere on it toggles the chrome. Strip the three settings it owned so
+    // the spread below doesn't carry them forward on every save.
+    if (parsed && typeof parsed === "object") {
+      delete parsed.mobileTapNav;
+      delete parsed.mobileTapZoneWidth;
+      delete parsed.mobileTapStride;
     }
     const merged = { ...DEFAULT_TWEAKS, ...parsed };
     // The reading library replaced the old three-option picker. `serif`,

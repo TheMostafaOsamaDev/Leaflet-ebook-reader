@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SideSheet } from "./SideSheet";
-import { FocusHint, useFocusChrome } from "../reader/chrome/focusChrome";
+import {
+  CHROME_INSET_BOTTOM,
+  CHROME_INSET_TOP,
+  FocusHint,
+  useFocusChrome,
+} from "../reader/chrome/focusChrome";
 import { ReaderTopBar } from "../reader/chrome/ReaderTopBar";
 import { MAX_TICKS, ReaderProgressBar } from "../reader/chrome/ReaderProgressBar";
 import { ReaderIconButton } from "../reader/chrome/ReaderIconButton";
@@ -156,6 +161,9 @@ export function DesktopReader({
     // A docked Contents panel keeps the floating bars off its own header.
     dockInset: tocDocked ? DOCK_WIDTH : 0,
   });
+  // The top bar frosts itself (ReaderTopBar); the bottom one is assembled here
+  // out of ReaderProgressBar, so its wrapper carries the glass.
+  const glassBottom = focus.glass("bottom");
 
   // The live paragraph for the current chapter — updated by both the
   // scroll listener and PaginatedView. Used so that switching reading
@@ -694,16 +702,20 @@ export function DesktopReader({
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        // Anchors the chrome bars when focus mode lifts them out of the flow.
+        // Anchors the chrome bars, which float over the content region in
+        // both modes rather than sitting above it in the flow.
         position: "relative",
         fontFamily: FONT_STACKS.sans,
       }}
     >
-      {/* Wrapper carries the focus-mode float. Out of focus mode it adds
-          nothing but a flex row, so the bar sits in the layout as before. */}
+      {/* The bar floats over the page in BOTH modes, so the paragraph blurs
+          through it as it scrolls past — the phone reader's behaviour. Focus
+          mode adds the clip window that lets it slide away; out of focus mode
+          it is simply pinned. The reading column pads itself clear of the
+          space either way (CHROME_INSET_TOP). */}
       <div
         style={
-          focus.floating ? focus.clip("top", focus.showTop) : { flexShrink: 0 }
+          focus.floating ? focus.clip("top", focus.showTop) : focus.pin("top")
         }
       >
         <div
@@ -786,6 +798,17 @@ export function DesktopReader({
           open={activePanel !== null}
           onClose={() => setActivePanel(null)}
           dock={tocDocked}
+          // Keep an overlay panel clear of the pinned bars. Not applied in
+          // focus mode: there the bars start hidden, so insetting the panel
+          // would leave two empty strips for no reason.
+          chromeInset={
+            focus.floating
+              ? undefined
+              : {
+                  top: `calc(${CHROME_INSET_TOP}px + env(safe-area-inset-top, 0px))`,
+                  bottom: CHROME_INSET_BOTTOM,
+                }
+          }
           // Navigation panels rest on the leading edge; tool panels (settings,
           // progress) on the trailing edge. SideSheet flips these under RTL.
           side={
@@ -899,7 +922,11 @@ export function DesktopReader({
               ref={paginatedWrapRef}
               style={{
                 flex: 1,
-                padding: `60px ${readingGutter(t.contentWidth, 24, 80)}px 30px`,
+                // Pads clear of the floating bars, so the first line still sits
+                // 60px below the top bar the way it did when the bar was in
+                // the flow — but the text now scrolls UNDER it rather than
+                // stopping at its edge, which is what the blur samples.
+                padding: `calc(${CHROME_INSET_TOP + 60}px + env(safe-area-inset-top, 0px)) ${readingGutter(t.contentWidth, 24, 80)}px ${CHROME_INSET_BOTTOM + 30}px`,
                 position: "relative",
                 minHeight: 0,
                 minWidth: 0,
@@ -942,7 +969,11 @@ export function DesktopReader({
               style={{
                 flex: 1,
                 overflow: "auto",
-                padding: `60px ${readingGutter(t.contentWidth, 24, 80)}px 30px`,
+                // Pads clear of the floating bars, so the first line still sits
+                // 60px below the top bar the way it did when the bar was in
+                // the flow — but the text now scrolls UNDER it rather than
+                // stopping at its edge, which is what the blur samples.
+                padding: `calc(${CHROME_INSET_TOP + 60}px + env(safe-area-inset-top, 0px)) ${readingGutter(t.contentWidth, 24, 80)}px ${CHROME_INSET_BOTTOM + 30}px`,
                 position: "relative",
                 background: surfaces.page,
                 // overscroll-behavior: contain stops the browser's own
@@ -992,18 +1023,22 @@ export function DesktopReader({
         style={
           focus.floating
             ? focus.clip("bottom", focus.showBottom)
-            : { flexShrink: 0 }
+            : focus.pin("bottom")
         }
       >
         <div
-          style={
-            focus.floating
-              ? {
-                  ...focus.slide("bottom", focus.showBottom),
-                  borderTop: `0.5px solid ${theme.rule}`,
-                }
-              : undefined
-          }
+          // The frosted fill and its hairline live here rather than on
+          // ReaderProgressBar: that component is also used inside the panels
+          // and the phone reader's bottom bar, where it is NOT the floating
+          // surface. `backdrop-filter` has to sit on the element that carries
+          // the fill, so the two travel together.
+          className={glassBottom.className}
+          style={{
+            ...glassBottom.style,
+            ...(focus.floating
+              ? focus.slide("bottom", focus.showBottom)
+              : null),
+          }}
         >
         <ReaderProgressBar
           theme={theme}

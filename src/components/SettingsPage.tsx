@@ -167,7 +167,6 @@ export function SettingsPage({
       t,
       setTweak,
       tr,
-      mobile: isMobile,
       showPageTurn: !isMobile,
     }),
     behavior: [

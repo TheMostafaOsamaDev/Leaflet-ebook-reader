@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 import { BookBody, readingGutter } from "./BookBody";
@@ -12,6 +13,7 @@ import {
 import { MobileSheet } from "./MobileSheet";
 import { MAX_TICKS, ReaderProgressBar } from "../reader/chrome/ReaderProgressBar";
 import { ReaderTabBar } from "../reader/chrome/ReaderTabBar";
+import { glassBar } from "../reader/chrome/glass";
 import { SelectionPopover } from "./SelectionPopover";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { SelectionHandle } from "./SelectionHandle";
@@ -266,12 +268,32 @@ export function MobileReader({
   const chromeTransition = reduced
     ? "none"
     : `transform ${MOTION.med}ms ${EASE.enter}, opacity ${MOTION.med}ms ${EASE.enter}`;
+  const glassTop = glassBar(theme, "top");
+  const glassBottom = glassBar(theme, "bottom");
+
+  // Android full screen. The app draws edge-to-edge, so hiding the reader's
+  // own bars used to leave the SYSTEM bars painted over the page — the clock
+  // and battery icons sat on the first line, with the text running under them.
+  // The system bars now go with the chrome. They come back on an edge swipe
+  // (transient) or the moment the chrome is tapped back in.
+  //
+  // Rejects and no-ops everywhere but Android, so no platform check is needed.
+  useEffect(() => {
+    void invoke("set_immersive_mode", { immersive: !showChrome }).catch(
+      () => {},
+    );
+  }, [showChrome]);
+  // Leaving the reader always restores them, whatever state the chrome was in.
+  // Kept apart from the effect above deliberately: as that one's cleanup it
+  // would fire on every toggle, showing the bars again a frame after each
+  // request to hide them. Mount-only, so it runs on unmount and nowhere else.
+  useEffect(
+    () => () => {
+      void invoke("set_immersive_mode", { immersive: false }).catch(() => {});
+    },
+    [],
+  );
   const [sheet, setSheet] = useState<ActivePanel>(null);
-  // Bumping this remounts the tap-zone preview overlays so the CSS
-  // keyframe animation restarts. The 3s timer below resets it to 0,
-  // unmounting the divs (otherwise they'd sit as opacity-0 elements).
-  const [zoneFlash, setZoneFlash] = useState(0);
-  const isFirstZoneRender = useRef(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
   const startEndpointRef = useRef<RangeEndpoint | null>(null);
@@ -734,27 +756,6 @@ export function MobileReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.highlights]);
 
-  // Flash the left/right tap-zone overlays whenever the user changes
-  // the zone width — or turns tap-nav on — so they get a momentary
-  // preview of how wide the new zones are. Skip the very first render
-  // (initial mount shouldn't flash a setting that hasn't been touched)
-  // and skip while tap-nav is off (the zones are inert, no point
-  // previewing them).
-  useEffect(() => {
-    if (isFirstZoneRender.current) {
-      isFirstZoneRender.current = false;
-      return;
-    }
-    if (!t.mobileTapNav) return;
-    setZoneFlash((n) => n + 1);
-  }, [t.mobileTapZoneWidth, t.mobileTapNav]);
-
-  useEffect(() => {
-    if (zoneFlash === 0) return;
-    const id = window.setTimeout(() => setZoneFlash(0), 3000);
-    return () => window.clearTimeout(id);
-  }, [zoneFlash]);
-
   const dismissSelection = () => {
     setSelAnchor(null);
     setSelRects([]);
@@ -812,6 +813,7 @@ export function MobileReader({
           pointer events so taps fall through to the reader. */}
       <div
         ref={chromeRef}
+        className={glassTop.className}
         aria-hidden={chromeHidden}
         style={{
           position: "absolute",
@@ -823,7 +825,10 @@ export function MobileReader({
           display: "flex",
           alignItems: "center",
           gap: 8,
-          background: theme.chrome,
+          // Frosted, so the paragraph passing under the bar stays visible
+          // instead of being clipped off by an opaque strip — see
+          // reader/chrome/glass.ts.
+          ...glassTop.style,
           transform: chromeHidden ? "translateY(-100%)" : "translateY(0)",
           opacity: chromeHidden ? 0 : 1,
           transition: chromeTransition,
@@ -892,37 +897,11 @@ export function MobileReader({
 
       <div
         ref={scrollRef}
-        onClick={(e) => {
-          // Tapping a highlight goes through the document-level click
-          // handler (it opens the action popover); toggle chrome to
-          // match the existing behavior in that case.
-          const target = e.target as HTMLElement | null;
-          if (target?.closest("[data-h-id]")) {
-            setShowChrome((s) => !s);
-            return;
-          }
-          // Tap-zones off → simple chrome toggle (the legacy gesture).
-          if (!t.mobileTapNav) {
-            setShowChrome((s) => !s);
-            return;
-          }
-          // Two side bands of configurable width page up/down; the
-          // remaining center band toggles the chrome. The stride (how
-          // far one tap scrolls) is also user-configurable as a
-          // percentage of the visible reader height.
-          const el = e.currentTarget;
-          const rect = el.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const edge = rect.width * (t.mobileTapZoneWidth / 100);
-          const stride = rect.height * (t.mobileTapStride / 100);
-          if (x < edge) {
-            el.scrollBy({ top: -stride, behavior: "smooth" });
-          } else if (x > rect.width - edge) {
-            el.scrollBy({ top: stride, behavior: "smooth" });
-          } else {
-            setShowChrome((s) => !s);
-          }
-        }}
+        // A tap anywhere on the page toggles the chrome — including on a
+        // highlight, which also opens its action popover through the
+        // document-level click handler. The reading surface is scroll-only:
+        // the edge bands that used to page up and down are gone.
+        onClick={() => setShowChrome((s) => !s)}
         style={{
           flex: 1,
           overflow: "auto",
@@ -967,6 +946,7 @@ export function MobileReader({
       {/* Bottom chrome — same always-mounted pattern as the top bar.
           Slides down off-screen when hidden and gives up pointer events. */}
       <div
+        className={glassBottom.className}
         aria-hidden={chromeHidden}
         style={{
           position: "absolute",
@@ -976,7 +956,7 @@ export function MobileReader({
           zIndex: 10,
           padding: "14px 20px calc(env(safe-area-inset-bottom, 0px) + 16px)",
           color: theme.chromeInk,
-          background: theme.chrome,
+          ...glassBottom.style,
           transform: chromeHidden ? "translateY(100%)" : "translateY(0)",
           opacity: chromeHidden ? 0 : 1,
           transition: chromeTransition,
@@ -1181,43 +1161,6 @@ export function MobileReader({
           onDismiss={() => setActiveHl(null)}
         />
       )}
-      {zoneFlash > 0 && (
-        // Sit above the settings sheet (zIndex 20) so the user sees
-        // the preview while the slider that drives it is open. The
-        // 18% tint is light enough that the slider underneath stays
-        // legible. pointerEvents:none keeps taps flowing through to
-        // the controls behind it.
-        <>
-          <div
-            key={`zone-l-${zoneFlash}`}
-            aria-hidden
-            style={tapZoneFlashStyle("left", t.mobileTapZoneWidth, theme)}
-          />
-          <div
-            key={`zone-r-${zoneFlash}`}
-            aria-hidden
-            style={tapZoneFlashStyle("right", t.mobileTapZoneWidth, theme)}
-          />
-        </>
-      )}
     </div>
   );
-}
-
-function tapZoneFlashStyle(
-  side: "left" | "right",
-  widthPct: number,
-  theme: Theme,
-): CSSProperties {
-  return {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    [side]: 0,
-    width: `${widthPct}%`,
-    background: theme.ink,
-    pointerEvents: "none",
-    zIndex: 30,
-    animation: "riwaq-zone-flash 3000ms ease-out forwards",
-  };
 }

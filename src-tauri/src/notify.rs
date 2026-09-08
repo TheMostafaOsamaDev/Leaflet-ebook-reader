@@ -94,6 +94,33 @@ pub async fn set_status_bar_style(
     }
 }
 
+/// Hide or restore Android's status and navigation bars, for the reader's
+/// full-screen mode.
+///
+/// The app draws edge-to-edge, so the system bars are painted over the reader
+/// rather than beside it. When the reader tapped its own chrome away the bars
+/// stayed put, leaving the clock and battery icons on top of the first line of
+/// the page. Hiding them with the chrome is what makes full screen full.
+///
+/// The bars return on an edge swipe (transient) and whenever the reader brings
+/// its chrome back, so nothing is ever unreachable.
+///
+/// No-op on non-Android.
+#[tauri::command]
+pub async fn set_immersive_mode(app: AppHandle, immersive: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android_set_immersive_mode(&app, immersive)
+            .map_err(|e| format!("android immersive mode failed: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, immersive);
+        Ok(())
+    }
+}
+
 /// `#rrggbb` → opaque ARGB, as the `jint` Android's `ColorDrawable` wants.
 /// Returns None for anything that isn't exactly six hex digits behind a `#`,
 /// so a malformed value leaves the previously stashed colour alone rather
@@ -352,6 +379,40 @@ fn android_set_bar_appearance(
     );
     // Keeps a signature mismatch to what it should be — the bars just don't
     // get restyled.
+    drain_pending_exception(&mut env);
+    res
+}
+
+#[cfg(target_os = "android")]
+fn android_set_immersive_mode(
+    _app: &AppHandle,
+    immersive: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ctx = ndk_context::android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }?;
+    let mut env = vm.attach_current_thread()?;
+    let activity =
+        unsafe { JObject::from_raw(ctx.context() as jni::sys::jobject) };
+
+    // Same three-way agreement as android_set_bar_appearance: the descriptor
+    // here, the Kotlin signature, and the -keep rule in
+    // gen/android/app/proguard-rules.pro. When they drift, R8 strips the method
+    // from release builds and this lookup throws — debug builds stay fine,
+    // which is what makes the mismatch easy to ship.
+    let res = call_app_static_void(
+        &mut env,
+        &activity,
+        "com.leaflet.reader.MainActivity",
+        "setImmersiveMode",
+        "(Landroid/app/Activity;Z)V",
+        &[
+            JValue::Object(&activity),
+            JValue::Bool(if immersive { JNI_TRUE } else { JNI_FALSE } as jboolean),
+        ],
+    );
+    // A stripped or renamed method means the system bars simply stay as they
+    // are — full screen keeps the reader's own chrome hidden and nothing
+    // crashes.
     drain_pending_exception(&mut env);
     res
 }
