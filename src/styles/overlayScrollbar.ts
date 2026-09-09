@@ -171,6 +171,19 @@ type Thumb = {
    *  the rect + computed-style reads twice. */
   wake: boolean;
   shown: boolean;
+  /** Whether the transform is allowed to ease. False until the bar has been
+   *  visible for a frame.
+   *
+   *  The strip is positioned entirely by `transform`, so before its first
+   *  placement it sits at the host's origin — the top-left corner of the
+   *  viewport. With the glide armed, its first appearance animated all the way
+   *  across the screen to the real edge (and, after a fade-out, in from
+   *  wherever it was last left). The glide is only wanted for movement the
+   *  reader is already watching, so it stays off for the frame a bar appears
+   *  in and is armed on the next one. */
+  glide: boolean;
+  /** Pending frame that will arm `glide`. */
+  armRaf: number;
   hovered: boolean;
   dragging: boolean;
   teardown: () => void;
@@ -218,10 +231,27 @@ export function installOverlayScrollbar(): () => void {
     if (reduced) return "none";
     const fade = `opacity ${fading ? BAR.fadeOutMs : BAR.fadeInMs}ms ${EASE.out}`;
     // No glide while dragging — there, easing reads as the bar lagging the
-    // pointer rather than as smoothness.
-    return t.dragging
+    // pointer rather than as smoothness — nor on the frame a bar appears in,
+    // which would animate it in from its stale position.
+    return t.dragging || !t.glide
       ? fade
       : `${fade}, transform ${BAR.glideMs}ms ${EASE.out}`;
+  };
+
+  /** Allow the transform to ease again, from the next frame on. Two frames,
+   *  not one: a style written in the same frame as the transform can still be
+   *  coalesced with it, which is exactly the case this avoids. */
+  const armGlide = (t: Thumb) => {
+    if (t.glide || t.armRaf) return;
+    t.armRaf = window.requestAnimationFrame(() => {
+      t.armRaf = 0;
+      t.armRaf = window.requestAnimationFrame(() => {
+        t.armRaf = 0;
+        if (!t.shown) return;
+        t.glide = true;
+        t.strip.style.transition = transitionFor(t, false);
+      });
+    });
   };
 
   const destroy = (el: HTMLElement) => {
@@ -237,6 +267,13 @@ export function installOverlayScrollbar(): () => void {
   const hide = (t: Thumb) => {
     if (!t.shown) return;
     t.shown = false;
+    // Fading out disarms the glide: while invisible the bar's position goes
+    // stale, so the next appearance has to jump, not travel.
+    t.glide = false;
+    if (t.armRaf) {
+      window.cancelAnimationFrame(t.armRaf);
+      t.armRaf = 0;
+    }
     t.strip.style.transition = transitionFor(t, true);
     t.strip.style.opacity = "0";
   };
@@ -250,6 +287,8 @@ export function installOverlayScrollbar(): () => void {
       t.dragging ? BAR.drag : t.hovered ? BAR.hover : BAR.rest,
     );
     t.shown = true;
+    // Now that it is placed and painted, let subsequent moves ease.
+    armGlide(t);
   };
 
   /** Position one thumb. Returns false when it shouldn't be painted, having
@@ -336,6 +375,8 @@ export function installOverlayScrollbar(): () => void {
       geom: null,
       idle: undefined,
       wake: false,
+      glide: false,
+      armRaf: 0,
       shown: false,
       hovered: false,
       dragging: false,
