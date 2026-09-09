@@ -20,6 +20,8 @@ import {
   useState,
 } from "react";
 import { readingSurfaces, type Theme, type ThemeKey } from "../../styles/tokens";
+import { EASE } from "../../styles/motion";
+import { BAR } from "../../styles/overlayScrollbar";
 import type { Highlight } from "../../store/library";
 import { resolveDocxSelection, type DocxSelectionAnchor } from "./docxHighlight";
 import {
@@ -1353,22 +1355,27 @@ export const FixedPageViewer = forwardRef<
       bar.style.opacity = "0";
       return;
     }
-    const trackH = clientHeight - PAD * 2;
-    const thumbH = Math.max(28, (clientHeight / scrollHeight) * trackH);
+    // Track geometry comes from `BAR` (not the page's PAD) so this bar matches
+    // the app-wide overlay one — see styles/overlayScrollbar.ts.
+    const trackH = clientHeight - BAR.pad * 2;
+    const thumbH = Math.max(
+      BAR.minThumb,
+      (clientHeight / scrollHeight) * trackH,
+    );
     const top = (scrollTop / (scrollHeight - clientHeight)) * (trackH - thumbH);
     bar.style.height = `${thumbH}px`;
-    bar.style.transform = `translateY(${PAD + Math.max(0, top)}px)`;
+    bar.style.transform = `translateY(${BAR.pad + Math.max(0, top)}px)`;
   }, []);
 
   const flashBar = useCallback(() => {
     const el = scrollRef.current;
     const bar = barRef.current;
     if (!el || !bar || el.scrollHeight <= el.clientHeight + 2) return;
-    bar.style.opacity = "0.5";
+    bar.style.opacity = String(BAR.rest);
     if (barIdle.current) window.clearTimeout(barIdle.current);
     barIdle.current = window.setTimeout(() => {
       if (barRef.current) barRef.current.style.opacity = "0";
-    }, 800);
+    }, BAR.idleMs);
   }, []);
 
   useEffect(() => {
@@ -1531,6 +1538,9 @@ export const FixedPageViewer = forwardRef<
       <div
         ref={scrollRef}
         className="no-scrollbar"
+        // This viewer draws its own floating bar (below), so the app-wide
+        // overlay one must not paint a second one over the same container.
+        data-no-overlay-scrollbar
         onClick={flow === "paged" ? onPagedClick : undefined}
         onMouseMove={flow === "paged" ? onPagedMove : undefined}
         style={{
@@ -1666,13 +1676,13 @@ export const FixedPageViewer = forwardRef<
         style={{
           position: "absolute",
           top: 0,
-          insetInlineEnd: 3,
-          width: 6,
-          height: 28,
-          borderRadius: 3,
+          insetInlineEnd: BAR.inset,
+          width: BAR.width,
+          height: BAR.minThumb,
+          borderRadius: BAR.width,
           background: theme.muted,
           opacity: 0,
-          transition: "opacity 240ms ease",
+          transition: `opacity ${BAR.fadeOutMs}ms ${EASE.out}`,
           pointerEvents: "none",
           zIndex: 6,
         }}

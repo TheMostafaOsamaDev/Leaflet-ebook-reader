@@ -248,8 +248,10 @@
    that effect runs. See tokens.ts / the App theme effect. */
 :root {
   --ph: #6f5a3d; /* placeholder text = theme.muted */
-  --sb-thumb: rgba(58, 47, 31, 0.22); /* scrollbar thumb = theme.ruleStrong */
-  --sb-thumb-hover: #6f5a3d; /* scrollbar thumb hover = theme.muted */
+  /* Overlay-scrollbar bar = theme.muted. Must stay a SOLID colour: the bar's
+     translucency comes from its own opacity, so an alpha-baked value here
+     would multiply down to nearly invisible. */
+  --sb-thumb: #6f5a3d;
 }
 
 html,
@@ -324,50 +326,64 @@ textarea::placeholder {
   background: rgba(201, 100, 66, 0.28);
 }
 
-/* Custom scrollbar — theme-aware via the vars set in App.tsx so the thumb
-   stays visible on dark/oled backgrounds instead of a fixed sepia tint.
+/* Scrollbars — the native bar is hidden app-wide and replaced by our own
+   overlay thumb (styles/overlayScrollbar.ts).
 
-   The thumb is TRANSPARENT at rest and only paints while the container is
-   actually scrolling (or the pointer is over it), the way an overlay
-   scrollbar behaves. `data-scrolling` is stamped on the scrolling element by
-   `installScrollbarAutoHide()` and dropped ~800ms after the last scroll
-   event — the same idle window the fixed-page viewer's floating bar uses, so
-   the whole app shares one scrollbar rhythm.
+   Why not style `::-webkit-scrollbar`: the engines ignore `transition` on
+   scrollbar pseudo-elements (so a thumb that's transparent at rest snaps out
+   instead of fading), a native gutter is always flush to the container edge
+   (so the bar can't be inset), and the pseudo-elements render differently on
+   Android WebView / WKWebView. See the module header for the full reasoning.
 
-   The track stays transparent and the 8px gutter is always reserved, so
-   fading the thumb never reflows content.
-
-   Do NOT add `scrollbar-width` to these rules: setting the standard property
-   makes Chromium ignore the `::-webkit-scrollbar` pseudo-elements entirely
-   and fall back to a default bar. (The `.no-scrollbar` /
-   `.riwaq-scroll-hidden` helpers below set it deliberately, to hide.) */
+   Hiding the bar also reclaims the 8px gutter this used to reserve, so
+   content is that much wider — the overlay thumb floats over it instead. */
+* {
+  scrollbar-width: none;
+}
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-corner {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 4px;
-  transition: background-color 260ms ease;
-}
-[data-scrolling]::-webkit-scrollbar-thumb,
-*:hover::-webkit-scrollbar-thumb {
-  background: var(--sb-thumb, rgba(58, 47, 31, 0.22));
-}
-*:hover::-webkit-scrollbar-thumb:hover {
-  background: var(--sb-thumb-hover, #6f5a3d);
+  width: 0;
+  height: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *::-webkit-scrollbar-thumb {
-    transition: none;
-  }
+/* The overlay-scrollbar layer. `pointer-events: none` on the host so only the
+   individual grab strips can be hit, and only the one under the pointer arms
+   itself (see the controller). The z-index sits above app chrome and dialogs
+   so a scroll area inside a modal still gets its bar. */
+#riwaq-scrollbars {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483000;
+}
+
+/* The invisible grab strip. Wider than the bar it holds, so a 4px bar is
+   still catchable with a mouse. Positioned by the controller via transform;
+   `top`/`left` stay at 0 so the transform is the whole position. */
+#riwaq-scrollbars .riwaq-sb-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  justify-content: center;
+  width: 14px; /* BAR.hit */
+  opacity: 0;
+  pointer-events: none;
+  touch-action: none;
+  cursor: grab;
+  will-change: transform, opacity;
+}
+#riwaq-scrollbars .riwaq-sb-strip:active {
+  cursor: grabbing;
+}
+
+/* The bar itself. Colour is the theme's `muted` (a solid value, set by App)
+   with the translucency carried by the strip's opacity — so the same bar
+   reads correctly on a sepia page and on OLED black. */
+#riwaq-scrollbars .riwaq-sb-bar {
+  width: 4px; /* BAR.width */
+  height: 100%;
+  border-radius: 4px;
+  background: var(--sb-thumb, #6f5a3d);
 }
 
 /* Font-picker option rows (FontSelect). The resting background has to live
@@ -391,31 +407,22 @@ textarea::placeholder {
   }
 }
 
-/* Hide scrollbars in reading surfaces */
-.no-scrollbar {
-  scrollbar-width: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
-/* Hide the scrollbar chrome on compact scroll areas (e.g. the sidebar nav) so
-   a reserved-space scrollbar never shows as a stray sliver when the layout
-   flips under dir="rtl" (its gutter would otherwise land flush against
-   adjacent rounded chrome). Scrolling still works via wheel/trackpad; unlike
-   reserving a gutter, this keeps the container's content full width. */
+/* These three used to be the only places a native bar was suppressed, back
+   when the app styled `::-webkit-scrollbar` and reserved an 8px gutter
+   everywhere else. The rule at the top of this file now hides the native bar
+   app-wide, so they are kept only as markers of intent on the surfaces that
+   carry them — reading columns, the sidebar nav, and horizontal pill rows.
+   The declarations are belt-and-braces for any context that skips the
+   universal rule (e.g. a harness with its own reset). */
+.no-scrollbar,
 .riwaq-scroll-hidden {
   scrollbar-width: none;
 }
-.riwaq-scroll-hidden::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar,
+.riwaq-scroll-hidden::-webkit-scrollbar,
+.riwaq-pill-row::-webkit-scrollbar {
   width: 0;
   height: 0;
-}
-
-/* Mobile pill row uses inline-style scrollbar hide; webkit needs the
- * pseudo-element rule, which only attaches via a class selector. */
-.riwaq-pill-row::-webkit-scrollbar {
-  display: none;
 }
 
 /* Range input — a 44px-tall hit area (Apple HIG / Material touch minimum)

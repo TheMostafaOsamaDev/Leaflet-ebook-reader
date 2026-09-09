@@ -20,26 +20,17 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useReducedMotion } from "../styles/motion";
+import { EASE, useReducedMotion } from "../styles/motion";
+import { BAR } from "../styles/overlayScrollbar";
 
-/** Idle window before the thumb fades, matching FixedPageViewer's bar. */
-const IDLE_MS = 800;
-/** Inset from the container's top and bottom edges. */
-const PAD = 3;
-const THUMB_W = 5;
-const MIN_THUMB_H = 28;
-/** Opacity while visible — present but never loud over a page of text. */
-const VISIBLE = 0.45;
-/** How long the thumb takes to catch up to a new position.
- *
- *  Short on purpose. A wheel notch or a keyboard PageDown moves the content in
- *  one discrete jump, and without this the thumb teleports with it; easing the
- *  transform turns those steps into a glide. Push it much past ~150ms and the
- *  thumb visibly trails a continuous scroll instead of tracking it, which reads
- *  as lag rather than smoothness. Suppressed entirely while dragging the thumb
- *  — there, any easing means the bar lags the finger. */
-const GLIDE_MS = 120;
-const FADE_MS = 240;
+// Shape, opacity and timing all come from `BAR`, so this bar, the fixed-page
+// viewer's, and the app-wide overlay one are visually the same bar. See that
+// module for why the numbers are what they are.
+const { idleMs: IDLE_MS, pad: PAD, width: THUMB_W, minThumb: MIN_THUMB_H } = BAR;
+/** Opacity for a persistent bar. Stronger than the fainter scrolling weight:
+ *  in a picker it is the only cue that there is more below the fold, so it has
+ *  to read at a glance. */
+const VISIBLE = BAR.persistent;
 
 export function ScrollArea({
   children,
@@ -96,7 +87,7 @@ export function ScrollArea({
     const el = scrollRef.current;
     const thumb = thumbRef.current;
     if (!el || !thumb || el.scrollHeight <= el.clientHeight + 2) return;
-    thumb.style.opacity = String(VISIBLE);
+    thumb.style.opacity = String(alwaysVisible ? VISIBLE : BAR.rest);
     if (alwaysVisible) return;
     if (idle.current) window.clearTimeout(idle.current);
     idle.current = window.setTimeout(() => {
@@ -131,7 +122,7 @@ export function ScrollArea({
 
   const thumbTransition = reduced
     ? "none"
-    : `opacity ${FADE_MS}ms ease, transform ${GLIDE_MS}ms ease-out`;
+    : `opacity ${BAR.fadeOutMs}ms ${EASE.out}, transform ${BAR.glideMs}ms ${EASE.out}`;
 
   // Dragging the thumb. Without this a bar that is invisible at rest would be
   // unusable with a mouse: you could never grab it to drag.
@@ -178,6 +169,9 @@ export function ScrollArea({
       <div
         ref={scrollRef}
         className="no-scrollbar"
+        // This component draws its own bar, so the app-wide overlay one must
+        // not paint a second one over the same container.
+        data-no-overlay-scrollbar
         style={{ overflowY: "auto", height: "100%", ...scrollStyle }}
       >
         {children}
@@ -189,7 +183,7 @@ export function ScrollArea({
         style={{
           position: "absolute",
           // Logical inset so the bar lands on the correct edge under dir=rtl.
-          insetInlineEnd: 2,
+          insetInlineEnd: BAR.inset,
           top: 0,
           width: THUMB_W,
           borderRadius: THUMB_W,
