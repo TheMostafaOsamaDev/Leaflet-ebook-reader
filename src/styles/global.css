@@ -528,19 +528,23 @@ input:focus-visible,
 /* Chapter-mount transition. Used by the reader to mark a chapter swap so
    the user gets a tiny visual cue that they've moved between chapters —
    the content fades in and rises a few pixels. */
-@keyframes riwaq-chapter-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-.riwaq-chapter-enter {
-  animation: riwaq-chapter-enter 280ms ease-out;
-}
+/* The chapter-enter fade is deliberately gone.
+   It animated a freshly-mounted node from `opacity: 0`, and WKWebView does not
+   advance CSS animations while the document is hidden — the animation stays
+   "running" and the element holds its first keyframe. A chapter whose content
+   arrived while the window was occluded (streamed chapters land over the
+   network, so this is ordinary) mounted invisible and STAYED invisible until
+   something woke the webview, which is why scrolling brought it back.
+
+   Captured in the reader's own log at turn+2500ms on a 280ms animation:
+     animationName riwaq-chapter-enter · animationPlayState running
+     opacity 0 · transform matrix(1,0,0,1,0,8) · document.hidden true
+     hitTest p "…" — the text was there and hit-testable the whole time
+
+   Content must never have an invisible resting state. If the motion is wanted
+   back, it has to come from something that cannot strand it: animate transform
+   only (a stuck 8px offset is harmless where a stuck opacity is a blank page).
+   See finishStuckAnimations for the matching safety net. */
 
 /* Volume-accordion body reveal — fades/rises the chapter list in when a
    volume is expanded. Collapse is instant (the list unmounts); the header
@@ -560,10 +564,11 @@ input:focus-visible,
   animation: riwaq-collapse-enter 200ms ease-out;
 }
 
-/* Chapter-change toast: a centered pill that pops in, holds the chapter
-   title for ~1s, then fades out. The single keyframe sequence handles
-   in/hold/out so the host component just renders the element and lets
-   CSS take care of the timing. */
+/* Centered-pill in/hold/out sequence. Named for the chapter-change toast it
+   was written for; that toast is gone (it interrupted reading on every turn),
+   and the focus-mode hint below is now the only user. The single keyframe
+   sequence handles in/hold/out so a host just renders the element and lets
+   CSS own the timing. */
 @keyframes riwaq-chapter-toast {
   0% {
     opacity: 0;
@@ -582,11 +587,6 @@ input:focus-visible,
     transform: translate(-50%, calc(-50% - 6px)) scale(1);
   }
 }
-.riwaq-chapter-toast {
-  animation: riwaq-chapter-toast 1500ms cubic-bezier(0.22, 0.61, 0.36, 1)
-    forwards;
-}
-
 /* Focus-mode hint: the same in/hold/out sequence, held longer because it's a
    sentence to read rather than a chapter title to glance at. Shown once, the
    first time focus mode hides the chrome, so an empty window is never a

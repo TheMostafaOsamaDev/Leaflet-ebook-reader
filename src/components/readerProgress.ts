@@ -57,3 +57,25 @@ export function paginatedFraction(page: number, totalPages: number): number {
 export function fractionToWidth(fraction: number): string {
   return `${clamp01(fraction) * 100}%`;
 }
+
+/**
+ * Whether the reader should land at the BOTTOM of the chapter it just entered.
+ *
+ * Scrolling up past a chapter's top steps back a chapter and should land at
+ * that chapter's end, so reading continues upward mid-flow. The intent has to
+ * survive a wait: a streamed chapter arrives empty and its content lands over
+ * the network, and the mount effect cannot position anything until the
+ * paragraphs exist — so the request outlives the render that made it.
+ *
+ * It must NOT survive a change of destination. Naming the chapter it was made
+ * for is the whole point: a bare boolean, left set while an empty chapter was
+ * still fetching, would silently be spent on whatever chapter the reader moved
+ * to next — dropping them at the bottom of a chapter they had just turned
+ * FORWARD into, which is the bug this replaced.
+ */
+export function landAtEndFor(
+  pending: number | null,
+  currentChapter: number,
+): boolean {
+  return pending !== null && pending === currentChapter;
+}
