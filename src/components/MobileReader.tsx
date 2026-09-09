@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { CSSProperties } from "react";
 import { Icon } from "./Icon";
 import { BookBody, readingGutter } from "./BookBody";
+import { ChapterEndCard, ChapterStartLink } from "./ChapterEnd";
+import { jumpScrollTop } from "./scrollJump";
 import { ChapterProgressBar } from "./ChapterProgressBar";
 import {
   chapterScrollFraction,
+  landAtEndFor,
   paragraphScrollOffset,
   restoreScrollTop,
   fractionToWidth,
@@ -21,6 +24,7 @@ import { HighlightActionPopover } from "./HighlightActionPopover";
 import type { EpubBook } from "../epub/types";
 import type { BookState, Highlight } from "../store/library";
 import { EASE, MOTION, useReducedMotion } from "../styles/motion";
+import { useLineScroll } from "../reader/scroll/useLineScroll";
 import {
   FONT_STACKS,
   isRtlLanguage,
@@ -215,6 +219,10 @@ interface Props {
   /** Volume ranges for the Contents sheet, when the book's origin knows them
    *  (source novels). Omit for local EPUBs — Contents stays ungrouped. */
   tocVolumes?: TocVolume[];
+  /** Whether the NEXT chapter is already on the device, shown on the
+   *  end-of-chapter card because it predicts whether the turn will wait.
+   *  Omit when unknown — the card then says nothing rather than guessing. */
+  nextChapterAvailability?: "device" | "online";
   /** Navigate to the top-level Settings page (from the quick-panel link). */
   onOpenFullSettings?: () => void;
   onBack: () => void;
@@ -253,6 +261,7 @@ export function MobileReader({
   onUpdateHighlightNote,
   onJumpToHighlight,
   tocVolumes,
+  nextChapterAvailability,
   onOpenFullSettings,
   onBack,
 }: Props) {
@@ -295,6 +304,10 @@ export function MobileReader({
   );
   const [sheet, setSheet] = useState<ActivePanel>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Touch scrolling stays the platform's, momentum and all — nothing here
+  // intercepts a gesture. The only addition is a glide onto the nearest line
+  // once the fling has finished. See reader/scroll/lineScroll.ts.
+  useLineScroll({ scrollRef, mode: "settle", reducedMotion: reduced });
   const chromeRef = useRef<HTMLDivElement>(null);
   const startEndpointRef = useRef<RangeEndpoint | null>(null);
   const endEndpointRef = useRef<RangeEndpoint | null>(null);
@@ -303,6 +316,11 @@ export function MobileReader({
   resumeRef.current = resumeParagraph;
   const resumeOffsetRef = useRef(resumeOffset);
   resumeOffsetRef.current = resumeOffset;
+  // The chapter we stepped BACK into, or null. Holds the chapter INDEX rather
+  // than a boolean so a request left pending while a streamed chapter is
+  // still fetching cannot be spent on whatever chapter the reader moves to
+  // next — see landAtEndFor.
+  const landAtEndRef = useRef<number | null>(null);
   const progressFillRef = useRef<HTMLDivElement>(null);
   // Content direction — derived from the BOOK's own language, independent of
   // the UI locale above. BookBody sets its own `dir` from this on its own
@@ -323,7 +341,12 @@ export function MobileReader({
   const onParagraphChangeRef = useRef(onParagraphChange);
   onParagraphChangeRef.current = onParagraphChange;
 
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: positioning has to happen before the
+  // browser paints the new chapter. Painting at the top and scrolling
+  // afterwards leaves the revealed region unpainted in WKWebView — a chapter
+  // that is present and selectable but invisible until something scrolls (see
+  // jumpScrollTop). Same shape of bug, same fix, on both readers.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     // Streamed (source) chapters load their body async, so the paragraphs
@@ -332,18 +355,26 @@ export function MobileReader({
     // resume lands on the saved paragraph instead of falling through to
     // scrollTop = 0 (which dropped the reader at the chapter start).
     if (el.querySelectorAll("[data-p-index]").length === 0) return;
+    if (landAtEndFor(landAtEndRef.current, currentChapter)) {
+      // Came back a chapter: land at its end, which is the content adjoining
+      // where the reader was standing. The saved paragraph catches up from
+      // the scroll listener this move fires.
+      landAtEndRef.current = null;
+      jumpScrollTop(el, el.scrollHeight);
+      return;
+    }
     // Resuming at paragraph 0 means "start of chapter" — snap to the very
     // top so the chapter heading BookBody renders above paragraph 0 stays
     // visible. Using offsetTop of p0 would scroll the heading off-screen.
     if (resumeRef.current === 0 && resumeOffsetRef.current <= 0.001) {
-      el.scrollTop = 0;
+      jumpScrollTop(el, 0);
       return;
     }
     const target = el.querySelector<HTMLElement>(
       `[data-p-index="${resumeRef.current}"]`,
     );
     if (!target) {
-      el.scrollTop = 0;
+      jumpScrollTop(el, 0);
       return;
     }
     // The top chrome is position:absolute, so it overlays the scroll area
@@ -355,13 +386,16 @@ export function MobileReader({
       showChromeRef.current && chromeRef.current
         ? chromeRef.current.offsetHeight + 8
         : 0;
-    el.scrollTop = Math.max(
-      0,
-      restoreScrollTop(
-        target.offsetTop,
-        target.offsetHeight,
-        resumeOffsetRef.current,
-      ) - chromeOffset,
+    jumpScrollTop(
+      el,
+      Math.max(
+        0,
+        restoreScrollTop(
+          target.offsetTop,
+          target.offsetHeight,
+          resumeOffsetRef.current,
+        ) - chromeOffset,
+      ),
     );
     // book.chapters[currentChapter]?.id changes when a streamed chapter's
     // content is spliced in (its `#0` → `#<n>` id bump), re-running this so
@@ -446,6 +480,19 @@ export function MobileReader({
 
   const prevChapter = () => {
     if (currentChapter > 0) onChapterChange(currentChapter - 1);
+  };
+  /**
+   * Back a chapter, landing at its END.
+   *
+   * Used by the link above the chapter heading. Landing at the previous
+   * chapter's start would mean scrolling its whole length to reach the part
+   * that adjoins where the reader just was — and it would disagree with what
+   * scrolling up past the top already does.
+   */
+  const prevChapterAtEnd = () => {
+    if (currentChapter <= 0) return;
+    landAtEndRef.current = currentChapter - 1;
+    prevChapter();
   };
   const nextChapter = () => {
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
@@ -919,6 +966,17 @@ export function MobileReader({
         }}
         className="no-scrollbar"
       >
+        {currentChapter > 0 ? (
+          <ChapterStartLink
+            theme={theme}
+            tr={tr}
+            titleFont={FONT_STACKS[t.fontFamily]}
+            compact
+            prevNumber={currentChapter}
+            prevTitle={book.chapters[currentChapter - 1]?.title ?? ""}
+            onPrev={prevChapterAtEnd}
+          />
+        ) : null}
         <BookBody
           bookId={book.id}
           chapter={chapter}
@@ -940,6 +998,21 @@ export function MobileReader({
           language={book.language}
           widthPercent={t.contentWidth}
           selectable={false}
+        />
+        {/* Tap only, by design. The phone reader has no edge-scroll turn and
+            must not get one: touch momentum keeps delivering scroll events
+            after the finger has left the glass, which is how a single flick
+            used to cross three chapters. */}
+        <ChapterEndCard
+          theme={theme}
+          tr={tr}
+          titleFont={FONT_STACKS[t.fontFamily]}
+          compact
+          nextTitle={book.chapters[currentChapter + 1]?.title ?? null}
+          nextNumber={currentChapter + 2}
+          total={chapterCount}
+          availability={nextChapterAvailability}
+          onNext={nextChapter}
         />
       </div>
 

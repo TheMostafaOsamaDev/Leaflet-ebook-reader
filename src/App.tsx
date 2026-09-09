@@ -13,6 +13,7 @@ import { Library } from "./components/Library";
 import { Lightbox } from "./components/Lightbox";
 import { MobileReader } from "./components/MobileReader";
 import { SourceStreamReader } from "./components/SourceStreamReader";
+import { ReaderErrorBoundary } from "./components/ReaderErrorBoundary";
 import { SettingsPage } from "./components/SettingsPage";
 import { FixedPageReader } from "./reader/fixed/FixedPageReader";
 import { createPdfPageSource } from "./reader/fixed/PdfPageSource";
@@ -782,6 +783,7 @@ function App() {
         >
           <AnimatedSwap viewKey={streaming ? "stream" : "none"}>
             {streaming ? (
+              <ReaderErrorBoundary theme={theme} onBack={closeStream}>
               <SourceStreamReader
                 theme={theme}
                 themeKey={themeKey}
@@ -793,6 +795,7 @@ function App() {
                 startChapterId={streaming.chapterId}
                 onClose={closeStream}
               />
+              </ReaderErrorBoundary>
             ) : null}
           </AnimatedSwap>
         </div>
@@ -859,7 +862,8 @@ function App() {
               onBack={closeBook}
             />
           ) : loaded && loaded.book.id === base.bookId ? (
-            isMobile ? (
+            <ReaderErrorBoundary theme={theme} onBack={closeBook}>
+            {isMobile ? (
               <MobileReader
                 theme={theme}
                 themeKey={themeKey}
@@ -877,6 +881,7 @@ function App() {
                 onDeleteHighlight={removeHighlight}
                 onUpdateHighlightNote={editHighlightNote}
                 onJumpToHighlight={jumpToHighlight}
+                nextChapterAvailability="device"
                 onOpenFullSettings={openSettings}
                 onBack={closeBook}
               />
@@ -898,12 +903,14 @@ function App() {
                 onDeleteHighlight={removeHighlight}
                 onUpdateHighlightNote={editHighlightNote}
                 onJumpToHighlight={jumpToHighlight}
+                nextChapterAvailability="device"
                 activePanel={activePanel}
                 setActivePanel={setActivePanel}
                 onOpenFullSettings={openSettings}
                 onBack={closeBook}
               />
-            )
+            )}
+            </ReaderErrorBoundary>
           ) : (
             // base is reader but its data isn't loaded yet (browser-forward
             // into a book / dev reload) — the reader-location effect is

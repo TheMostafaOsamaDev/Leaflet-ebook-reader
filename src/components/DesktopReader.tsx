@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { SideSheet } from "./SideSheet";
 import {
   CHROME_INSET_BOTTOM,
@@ -9,15 +15,34 @@ import {
 import { ReaderTopBar } from "../reader/chrome/ReaderTopBar";
 import { MAX_TICKS, ReaderProgressBar } from "../reader/chrome/ReaderProgressBar";
 import { ReaderIconButton } from "../reader/chrome/ReaderIconButton";
-import { Icon } from "./Icon";
 import { BookBody, readingGutter } from "./BookBody";
+import { ChapterEndCard, ChapterStartLink } from "./ChapterEnd";
 import { PaginatedView, type PaginatedAPI } from "./PaginatedView";
 import {
   chapterScrollFraction,
   paragraphScrollOffset,
   restoreScrollTop,
   fractionToWidth,
+  landAtEndFor,
 } from "./readerProgress";
+import { ReaderDiagnostics } from "./ReaderDiagnostics";
+import { jumpScrollTop } from "./scrollJump";
+import { ReaderLogMarker } from "./ReaderLogMarker";
+import {
+  log as logEvent,
+  logSessionStart,
+  snapshotReader,
+} from "../lib/devLog";
+import { finishStuckAnimations } from "../lib/finishStuckAnimations";
+
+/** See the probe's render site below. Read once, so a reload is the switch. */
+const READER_PROBE = (() => {
+  try {
+    return localStorage.getItem("riwaq:dev:probe") === "1";
+  } catch {
+    return false;
+  }
+})();
 import { SelectionPopover } from "./SelectionPopover";
 import { HighlightActionPopover } from "./HighlightActionPopover";
 import type { EpubBook } from "../epub/types";
@@ -42,8 +67,9 @@ import {
   shouldDockContents,
 } from "../reader/chrome/dockContents";
 import { useI18n } from "../i18n/useI18n";
-import { formatNum, type Tr } from "../i18n";
+import { formatNum } from "../i18n";
 import { useReducedMotion } from "../styles/motion";
+import { useLineScroll } from "../reader/scroll/useLineScroll";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
 import { ProgressOverlay } from "../panels/ProgressOverlay";
 import { SettingsPanel } from "../panels/SettingsPanel";
@@ -86,6 +112,10 @@ interface Props {
   /** Volume ranges for the Contents panel, when the book's origin knows them
    *  (source novels). Omit for local EPUBs — Contents stays ungrouped. */
   tocVolumes?: TocVolume[];
+  /** Whether the NEXT chapter is already on the device, shown on the
+   *  end-of-chapter card because it predicts whether the turn will wait.
+   *  Omit when unknown — the card then says nothing rather than guessing. */
+  nextChapterAvailability?: "device" | "online";
   activePanel: ActivePanel;
   setActivePanel: (next: ActivePanel) => void;
   /** Navigate to the top-level Settings page (from the quick-panel link). */
@@ -111,6 +141,7 @@ export function DesktopReader({
   onUpdateHighlightNote,
   onJumpToHighlight,
   tocVolumes,
+  nextChapterAvailability,
   activePanel,
   setActivePanel,
   onOpenFullSettings,
@@ -150,6 +181,13 @@ export function DesktopReader({
   // ── Focus mode ────────────────────────────────────────────────────────────
   // Shared with the fixed-page reader — see reader/chrome/focusChrome.tsx.
   const reduced = useReducedMotion();
+  // Wheel scrolling glides and comes to rest on a whole line. Scroll mode
+  // only — the paginated modes do not scroll. See reader/scroll/lineScroll.ts.
+  useLineScroll({
+    scrollRef,
+    mode: mode === "scroll" ? "wheel" : "off",
+    reducedMotion: reduced,
+  });
   const panelOpen = activePanel !== null;
   const focus = useFocusChrome({
     active: t.focusMode,
@@ -192,12 +230,17 @@ export function DesktopReader({
     liveOffset.current = resumeOffset;
   }
 
-  // Set when we step backward into the previous chapter via scroll-up
-  // overscroll. The chapter-mount effect picks this up and lands the
-  // viewport at the bottom of the new chapter — natural for an upward
-  // scroll, since the reader was just continuing through the chapter
-  // edge. Cleared after the effect consumes it.
-  const landAtEndRef = useRef(false);
+  // The chapter we stepped BACKWARD into via scroll-up overscroll, or null.
+  // The chapter-mount effect picks it up and lands the viewport at that
+  // chapter's end — natural for an upward scroll, since the reader was just
+  // continuing through the chapter edge.
+  //
+  // It holds the chapter INDEX rather than a bare boolean because the request
+  // has to outlive the render that made it (a streamed chapter mounts empty
+  // and the effect cannot position anything until its paragraphs arrive) while
+  // still being void if the reader goes somewhere else in the meantime. See
+  // landAtEndFor.
+  const landAtEndRef = useRef<number | null>(null);
 
   const handleParagraphChange = useCallback(
     (idx: number, offset?: number) => {
@@ -225,47 +268,20 @@ export function DesktopReader({
   const prevChapter = () => {
     if (currentChapter > 0) onChapterChange(currentChapter - 1);
   };
+  /**
+   * Back a chapter, landing at its END — what scrolling up past the top
+   * already does. Landing at the previous chapter's start would mean
+   * scrolling its whole length (fourteen screens, in the book this was built
+   * for) to reach the part that adjoins where the reader just was.
+   */
+  const prevChapterAtEnd = () => {
+    if (currentChapter <= 0) return;
+    landAtEndRef.current = currentChapter - 1;
+    prevChapter();
+  };
   const nextChapter = () => {
     if (currentChapter < chapterCount - 1) onChapterChange(currentChapter + 1);
   };
-
-  // Centered chapter-name toast. Fires whenever the chapter actually
-  // changes (skipping the initial mount, since the user just opened the
-  // book and already knows where they are). The `seq` field is bumped
-  // each fire so re-keying the React node restarts the CSS animation
-  // even when the user lands on the same chapter twice in a row.
-  const [chapterToast, setChapterToast] = useState<{
-    title: string;
-    number: number;
-    total: number;
-    seq: number;
-  } | null>(null);
-  const toastChapterRef = useRef(currentChapter);
-  const toastSeqRef = useRef(0);
-  const toastTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (toastChapterRef.current === currentChapter) return;
-    toastChapterRef.current = currentChapter;
-    toastSeqRef.current += 1;
-    setChapterToast({
-      title: chapter.title,
-      number: currentChapter + 1,
-      total: chapterCount,
-      seq: toastSeqRef.current,
-    });
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    // Slightly longer than the CSS animation (1500ms) so the element
-    // unmounts after the fade-out finishes, not mid-animation.
-    toastTimerRef.current = window.setTimeout(() => {
-      setChapterToast(null);
-      toastTimerRef.current = null;
-    }, 1550);
-  }, [currentChapter, chapter.title, chapterCount]);
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    };
-  }, []);
 
   // Scroll to the live paragraph whenever the chapter changes or the
   // mode flips back to scroll — only active in scroll mode. Paginated
@@ -273,7 +289,16 @@ export function DesktopReader({
   // prop. Using `livePara` (not `resumeRef`) means a paginated→scroll
   // switch lands on the same paragraph the user was just reading, not on
   // the chapter's original entry point.
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: this runs BEFORE the browser paints the
+  // new chapter, so the chapter's first paint happens at the position the
+  // reader should be at. Under useEffect the browser painted the chapter at
+  // the top first and the scroll landed after, and WKWebView would not paint
+  // the region that jump revealed — leaving a chapter that was present,
+  // laid out, selectable and completely invisible until the reader scrolled.
+  // Positioning before the first paint means there is no second position to
+  // repaint into. jumpScrollTop's nudge stays as a safety net for the case
+  // where the content's height changes after this pass.
+  useLayoutEffect(() => {
     if (mode !== "scroll") return;
     const el = scrollRef.current;
     if (!el) return;
@@ -282,12 +307,27 @@ export function DesktopReader({
     // chapter content-id dep re-runs this once they mount. Returning here also
     // preserves landAtEndRef (we don't consume it on an empty pass).
     if (el.querySelectorAll("[data-p-index]").length === 0) return;
-    if (landAtEndRef.current) {
+    logEvent("position:run", {
+      chapter: currentChapter,
+      chapterId: chapter.id,
+      reactItems: chapter.paragraphs?.length ?? 0,
+      domParas: el.querySelectorAll("[data-p-index]").length,
+      scrollTopBefore: Math.round(el.scrollTop),
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      livePara: livePara.current,
+      liveOffset: liveOffset.current,
+      landAtEndPending: landAtEndRef.current,
+    });
+    if (landAtEndFor(landAtEndRef.current, currentChapter)) {
       // Came in via scroll-up overscroll — drop the reader at the bottom
       // of the new (previous) chapter so reading continues naturally
       // upward instead of jumping to the chapter's top.
-      landAtEndRef.current = false;
-      el.scrollTop = el.scrollHeight;
+      landAtEndRef.current = null;
+      // The big one: a jump to the end of a long chapter is exactly the case
+      // WKWebView leaves unpainted. See jumpScrollTop.
+      jumpScrollTop(el, el.scrollHeight);
+      logEvent("position:landAtEnd", { scrollTopAfter: Math.round(el.scrollTop) });
       const ps = el.querySelectorAll<HTMLElement>("[data-p-index]");
       if (ps.length > 0) {
         let lastIdx = 0;
@@ -306,20 +346,25 @@ export function DesktopReader({
     // paragraph 0 stays visible. Using paragraph 0's offsetTop scrolls the
     // heading off-screen and looks like the title is clipped on load.
     if (livePara.current === 0 && liveOffset.current <= 0.001) {
-      el.scrollTop = 0;
+      jumpScrollTop(el, 0);
+      logEvent("position:top", { scrollTopAfter: Math.round(el.scrollTop) });
       return;
     }
     const target = el.querySelector<HTMLElement>(
       `[data-p-index="${livePara.current}"]`,
     );
     if (target) {
-      el.scrollTop = restoreScrollTop(
-        target.offsetTop,
-        target.offsetHeight,
-        liveOffset.current,
+      jumpScrollTop(
+        el,
+        restoreScrollTop(target.offsetTop, target.offsetHeight, liveOffset.current),
       );
+      logEvent("position:restore", {
+        targetOffsetTop: target.offsetTop,
+        scrollTopAfter: Math.round(el.scrollTop),
+      });
     } else {
-      el.scrollTop = 0;
+      jumpScrollTop(el, 0);
+      logEvent("position:noTarget", { scrollTopAfter: Math.round(el.scrollTop) });
     }
     // book.chapters[currentChapter]?.id changes when a streamed chapter's
     // content is spliced in (its `#0` → `#<n>` id bump), re-running this so
@@ -433,101 +478,116 @@ export function DesktopReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPaginated, currentChapter, chapterCount, onChapterChange]);
 
-  // Overscroll state: when the reader is in scroll mode and the user
-  // keeps scrolling past the chapter's edge, a small indicator builds up
-  // at the relevant edge until a threshold flips chapters. Lets the user
-  // continue reading without reaching for the prev/next buttons.
-  const [overscroll, setOverscroll] = useState<{
-    dir: "down" | "up";
-    pct: number;
-  } | null>(null);
-  const overscrollAmtRef = useRef(0);
-  const overscrollDirRef = useRef<"down" | "up" | null>(null);
-  const overscrollResetTimer = useRef<number | null>(null);
-  const OVERSCROLL_THRESHOLD = 140; // px of accumulated wheel delta
+  // Scrolling at a chapter edge does NOT turn the chapter. The card at the
+  // chapter's end and the link at its top are the ways through, alongside the
+  // arrow keys.
+  //
+  // This reverses the "or keep scrolling past it" half of the original brief,
+  // and it is a decision rather than an omission. Three scroll-based rules were
+  // tried in the app and each failed the same way:
+  //
+  //   1. A velocity threshold, 1.6-4.6 notches scaled by wheel speed. Safe,
+  //      but every deliberate turn cost a push — which is what made the old
+  //      behaviour feel inefficient in the first place.
+  //   2. One turn per gesture, silence-based. A turn lands the reader ON an
+  //      edge (the last pixel going back, the first going forward), so their
+  //      next scroll reversed it. Measured: four turns in ten seconds,
+  //      alternating, never more than 359px into a chapter.
+  //   3. Disarming the direction that would undo the arrival until the reader
+  //      moved off that edge. Better, and still wrong: the guard cleared on
+  //      any movement, so landing at 7753, nudging up 157px to read, and
+  //      nudging back down turned the chapter anyway.
+  //
+  // The shared cause is that a wheel at an edge cannot distinguish "reading
+  // near the end" from "take me onward" — the intent is not in the gesture. It
+  // is in the card. Restoring scroll-to-turn means reviving
+  // reader/scroll/turnGate.ts, which is still in the tree with its tests.
+
+  // A chapter change from anywhere else — TOC, the scrubber, the keyboard —
+  // is not the reader pushing at an edge, so drop any in-flight arming
+  // instead of leaving a stale pill on screen or half-armed state behind.
+  // The pill always goes; the engine's own state survives its own turns.
+  // Opens the log with everything needed to read it cold: which book, how long,
+  // which layout, and how big the window is. Runs once per mount, and the log
+  // file is truncated at that point, so the file always describes this run.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    logSessionStart({
+      book: { id: book.id, title: book.title, chapters: chapterCount, lang: book.language },
+      startChapter: currentChapter,
+      readingMode: mode,
+      theme: themeKey,
+      focusMode: t.focusMode,
+      contentWidth: t.contentWidth,
+      fontSize: t.fontSize,
+    });
+    const onResize = () =>
+      logEvent("window:resize", { w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book.id]);
+
+  // The docked Contents panel reflows the reading column, and both blank-page
+  // reports so far had it open — so its state belongs in the log.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    logEvent("panel", { activePanel, tocDocked, focusMode: t.focusMode });
+    if (mode === "scroll") {
+      // Sample after the reflow has had a frame to happen.
+      const id = window.setTimeout(
+        () => snapshotReader(scrollRef.current, "panel-change"),
+        250,
+      );
+      return () => window.clearTimeout(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePanel, tocDocked, t.focusMode, mode]);
+
+  // Insurance against the class of bug that produced blank chapters: WKWebView
+  // holds an animation's first keyframe while the document is hidden, so
+  // anything that mounted occluded can come back invisible. The entry
+  // animation that caused it is gone; this lands anything else that was queued
+  // while hidden, the moment the reader looks at the window again.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.hidden) return;
+      const landed = finishStuckAnimations(scrollRef.current);
+      if (landed > 0) logEvent("animations:finished", { count: landed });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
+
+  // A chapter turn is the moment the bug happens, so the pane is sampled as
+  // the frames after it go by: the positioning decision is logged above, and
+  // these say whether what landed stayed correct once layout, streamed content
+  // and animations had all settled.
+  useEffect(() => {
+    if (!import.meta.env.DEV || mode !== "scroll") return;
+    const el = () => scrollRef.current;
+    snapshotReader(el(), "turn+0ms", { chapter: currentChapter });
+    const timers = [120, 400, 1200, 2500].map((ms) =>
+      window.setTimeout(
+        () => snapshotReader(el(), `turn+${ms}ms`, { chapter: currentChapter }),
+        ms,
+      ),
+    );
+    return () => timers.forEach(window.clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapter, book.id, mode, book.chapters[currentChapter]?.id]);
 
   useEffect(() => {
-    if (mode !== "scroll") return;
-    const el = scrollRef.current;
-    if (!el) return;
-
-    const reset = () => {
-      overscrollAmtRef.current = 0;
-      overscrollDirRef.current = null;
-      setOverscroll(null);
-      if (overscrollResetTimer.current) {
-        clearTimeout(overscrollResetTimer.current);
-        overscrollResetTimer.current = null;
-      }
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      const goingDown = e.deltaY > 0;
-      const goingUp = e.deltaY < 0;
-      // Tolerate sub-pixel rounding when measuring the chapter edge.
-      const atBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight <= 1;
-      const atTop = el.scrollTop <= 1;
-      let overscrollDir: "down" | "up" | null = null;
-      if (atBottom && goingDown && currentChapter < chapterCount - 1) {
-        overscrollDir = "down";
-      } else if (atTop && goingUp && currentChapter > 0) {
-        overscrollDir = "up";
-      }
-      if (overscrollDir === null) {
-        if (overscrollDirRef.current !== null) reset();
-        return;
-      }
-      // Block the browser's own bounce so the wheel events stay ours
-      // until we've decided whether to flip chapters.
-      e.preventDefault();
-      if (overscrollDirRef.current !== overscrollDir) {
-        overscrollDirRef.current = overscrollDir;
-        overscrollAmtRef.current = 0;
-      }
-      overscrollAmtRef.current = Math.min(
-        OVERSCROLL_THRESHOLD * 1.05,
-        overscrollAmtRef.current + Math.abs(e.deltaY),
-      );
-      const pct = Math.min(1, overscrollAmtRef.current / OVERSCROLL_THRESHOLD);
-      setOverscroll({ dir: overscrollDir, pct });
-
-      if (overscrollAmtRef.current >= OVERSCROLL_THRESHOLD) {
-        const triggered = overscrollDir;
-        reset();
-        if (triggered === "down") {
-          nextChapter();
-        } else {
-          // Going up: land at the bottom of the previous chapter so the
-          // reader's eye picks up where it left off, mid-flow.
-          landAtEndRef.current = true;
-          prevChapter();
-        }
-        return;
-      }
-      // No more wheel events for ~280ms? Treat as the user releasing —
-      // fade the indicator instead of leaving it stuck.
-      if (overscrollResetTimer.current)
-        clearTimeout(overscrollResetTimer.current);
-      overscrollResetTimer.current = window.setTimeout(reset, 280);
-    };
-
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-      // Drop any in-flight indicator state — if the chapter changed via
-      // some other path (TOC, scrub, keyboard) we don't want a stale
-      // pill stuck on screen.
-      if (overscrollResetTimer.current) {
-        clearTimeout(overscrollResetTimer.current);
-        overscrollResetTimer.current = null;
-      }
-      overscrollAmtRef.current = 0;
-      overscrollDirRef.current = null;
-      setOverscroll(null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, currentChapter, chapterCount]);
+    logEvent("chapter:external", { chapter: currentChapter });
+    // A TOC jump or scrub is an explicit destination, so any outstanding
+    // land-at-end request is void — otherwise it would still be waiting if the
+    // reader ever came back to that chapter by another route.
+    landAtEndRef.current = null;
+  }, [currentChapter, book.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -942,7 +1002,7 @@ export function DesktopReader({
                 onChapterProgress={onPaginatedProgress}
                 pageTurnAnimation={t.pageTurnAnimation}
               >
-                <div key={chapter.id} className="riwaq-chapter-enter">
+                <div key={chapter.id}>
                   <BookBody
                     bookId={book.id}
                     chapter={chapter}
@@ -983,7 +1043,25 @@ export function DesktopReader({
               }}
               className="no-scrollbar"
             >
-              <div key={chapter.id} className="riwaq-chapter-enter">
+              <div key={chapter.id}>
+                {currentChapter > 0 ? (
+                  <div
+                    style={{
+                      maxWidth: 660,
+                      margin: "0 auto",
+                      padding: `0 ${readingGutter(t.contentWidth, 24, 80)}px`,
+                    }}
+                  >
+                    <ChapterStartLink
+                      theme={theme}
+                      tr={tr}
+                      titleFont={FONT_STACKS[t.fontFamily]}
+                      prevNumber={currentChapter}
+                      prevTitle={book.chapters[currentChapter - 1]?.title ?? ""}
+                      onPrev={prevChapterAtEnd}
+                    />
+                  </div>
+                ) : null}
                 <BookBody
                   bookId={book.id}
                   chapter={chapter}
@@ -999,17 +1077,35 @@ export function DesktopReader({
                   paragraphSpacing={t.paragraphSpacing}
                   hyphenation={t.hyphenation}
                   language={book.language}
-                  widthPercent={t.contentWidth}
                   highlights={state.highlights}
+                />
+                <ChapterEndCard
+                  theme={theme}
+                  tr={tr}
+                  titleFont={FONT_STACKS[t.fontFamily]}
+                  nextTitle={book.chapters[currentChapter + 1]?.title ?? null}
+                  nextNumber={currentChapter + 2}
+                  total={chapterCount}
+                  availability={nextChapterAvailability}
+                  onNext={nextChapter}
                 />
               </div>
             </div>
           )}
-          {overscroll && (
-            <OverscrollIndicator theme={theme} state={overscroll} tr={tr} />
-          )}
-          {chapterToast && (
-            <ChapterToast key={chapterToast.seq} theme={theme} info={chapterToast} tr={tr} isAr={dir === "rtl"} />
+          {/* Dev-only, and off unless asked for: a blank reading pane has
+              several possible causes that look identical in a screenshot, so
+              this measures rather than guesses. Switch it on for a session
+              with `localStorage["riwaq:dev:probe"] = "1"` and reload. Vite
+              replaces import.meta.env.DEV with false in a release build,
+              dropping it entirely. */}
+          {import.meta.env.DEV && <ReaderLogMarker scrollRef={scrollRef} />}
+          {import.meta.env.DEV && READER_PROBE && (
+            <ReaderDiagnostics
+              scrollRef={scrollRef}
+              chapterIndex={currentChapter}
+              chapterId={chapter.id}
+              reactItemCount={chapter.paragraphs?.length ?? 0}
+            />
           )}
         </div>
       </div>
@@ -1111,159 +1207,6 @@ export function DesktopReader({
           onDismiss={() => setActiveHl(null)}
         />
       )}
-    </div>
-  );
-}
-
-/**
- * Centered chapter-name pop-up. Fires on each chapter swap so the reader
- * gets a clear "you're now on Chapter X" cue without needing to look at
- * the chrome bar. Animation timing is owned by CSS (.riwaq-chapter-toast),
- * the host just renders + unmounts.
- */
-/** One-time focus-mode hint. Same pill as ChapterToast, held longer because
- *  it's a sentence to read rather than a title to glance at — an empty window
- *  on a later launch should never be a mystery. */
-function ChapterToast({
-  theme,
-  info,
-  tr,
-  isAr,
-}: {
-  theme: Theme;
-  info: { title: string; number: number; total: number };
-  tr: Tr;
-  isAr: boolean;
-}) {
-  return (
-    <div
-      className="riwaq-chapter-toast"
-      style={{
-        position: "absolute",
-        left: "50%",
-        top: "50%",
-        // Initial transform is overridden by the keyframes; setting it
-        // here keeps SSR / pre-animation paint centered too.
-        transform: "translate(-50%, -50%)",
-        pointerEvents: "none",
-        zIndex: 50,
-        padding: "16px 28px",
-        borderRadius: 14,
-        background: theme.chrome,
-        color: theme.ink,
-        border: `0.5px solid ${theme.rule}`,
-        boxShadow: "0 16px 44px rgba(0,0,0,0.22)",
-        backdropFilter: "blur(6px)",
-        WebkitBackdropFilter: "blur(6px)",
-        fontFamily: FONT_STACKS.sans,
-        textAlign: "center",
-        minWidth: 220,
-        maxWidth: 360,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: isAr ? "normal" : "0.14em",
-          textTransform: isAr ? "none" : "uppercase",
-          color: theme.muted,
-          marginBottom: 6,
-        }}
-      >
-        {tr("reader.chapterOfTotal", { n: info.number, total: info.total })}
-      </div>
-      <div
-        style={{
-          fontFamily: titleFontFor(info.title),
-          fontSize: 18,
-          fontStyle: "normal",
-          fontWeight: 500,
-          letterSpacing: "-0.01em",
-          lineHeight: 1.3,
-          color: theme.ink,
-          // Truncate very long titles to two lines so the toast doesn't
-          // turn into a full-screen takeover for chapters with long
-          // editorial subheads.
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
-        }}
-      >
-        {info.title}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Subtle pill that fades in at the chapter edge when the reader keeps
- * scrolling past the end (or top). Fills as accumulated overscroll
- * approaches the chapter-flip threshold.
- */
-function OverscrollIndicator({
-  theme,
-  state,
-  tr,
-}: {
-  theme: Theme;
-  state: { dir: "down" | "up"; pct: number };
-  tr: Tr;
-}) {
-  const isDown = state.dir === "down";
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: "50%",
-        transform: "translateX(-50%)",
-        [isDown ? "bottom" : "top"]: 60,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "8px 14px",
-        borderRadius: 999,
-        background: theme.chrome,
-        color: theme.muted,
-        border: `0.5px solid ${theme.rule}`,
-        fontSize: 11,
-        fontFamily: FONT_STACKS.sans,
-        pointerEvents: "none",
-        opacity: 0.4 + state.pct * 0.6,
-        boxShadow: `0 6px 18px ${theme.rule}`,
-        zIndex: 30,
-      }}
-    >
-      <span
-        style={{
-          display: "inline-flex",
-          transform: isDown ? "none" : "rotate(180deg)",
-        }}
-      >
-        <Icon name="chevronD" size={12} />
-      </span>
-      <span>
-        {isDown ? tr("reader.keepScrollingNext") : tr("reader.keepScrollingPrev")}
-      </span>
-      <div
-        style={{
-          width: 50,
-          height: 2,
-          background: theme.rule,
-          borderRadius: 1,
-        }}
-      >
-        <div
-          style={{
-            width: `${state.pct * 100}%`,
-            height: "100%",
-            background: theme.ink,
-            borderRadius: 1,
-            transition: "width 80ms linear",
-          }}
-        />
-      </div>
     </div>
   );
 }

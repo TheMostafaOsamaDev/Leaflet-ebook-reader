@@ -41,6 +41,7 @@ import { findSourceEntry, updateSourceReadingPosition } from "../store/library";
 import {
   chapterImageSrc,
   markChapterRead,
+  chapterIsDownloaded,
   readChapterContent,
   readSnapshot,
   snapshotToSourceNovel,
@@ -60,6 +61,8 @@ import { useI18n } from "../i18n/useI18n";
 import type { ActivePanel, TocVolume, Tweaks } from "../types/reader";
 import type { HighlightColor } from "../styles/tokens";
 import { migrateStorageKey } from "../lib/legacyStorage";
+import { chapterOverlay } from "./sourceChapterStatus";
+import { log as devLog } from "../lib/devLog";
 
 interface Props {
   theme: Theme;
@@ -124,8 +127,19 @@ export function SourceStreamReader({
   const [resumeParagraph, setResumeParagraph] = useState(0);
   const [resumeOffset, setResumeOffset] = useState(0);
   const [jumpNonce, setJumpNonce] = useState(0);
-  const [chapterLoading, setChapterLoading] = useState(false);
-  const [chapterError, setChapterError] = useState<string | null>(null);
+  // Per-chapter-index, not a shared flag: the effect below fetches the chapter
+  // being read AND prefetches the next one at the same time, so a single
+  // boolean was answered by whichever finished first. See chapterOverlay.
+  /** Whether the NEXT chapter can be opened without the network, for the
+   *  end-of-chapter card. Left undefined until known, so the card says
+   *  nothing rather than promising something it has not checked. */
+  const [nextAvailability, setNextAvailability] = useState<
+    "device" | "online" | undefined
+  >(undefined);
+  const [inFlight, setInFlight] = useState<ReadonlySet<number>>(() => new Set());
+  const [chapterErrors, setChapterErrors] = useState<ReadonlyMap<number, string>>(
+    () => new Map(),
+  );
 
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
 
@@ -270,13 +284,27 @@ export function SourceStreamReader({
       if (!source) return;
       const cached = cacheRef.current.get(idx);
       if (cached) {
+        devLog("fetch:cacheHit", { idx, items: cached.length });
         setBook((prev) => spliceChapter(prev, idx, cached));
         return;
       }
       const stub = flat[idx];
-      if (!stub) return;
-      setChapterLoading(true);
-      setChapterError(null);
+      if (!stub) {
+        devLog("fetch:noStub", { idx });
+        return;
+      }
+      devLog("fetch:start", { idx, sourceId: stub.sourceId });
+      setInFlight((prev) => {
+        const next = new Set(prev);
+        next.add(idx);
+        return next;
+      });
+      setChapterErrors((prev) => {
+        if (!prev.has(idx)) return prev;
+        const next = new Map(prev);
+        next.delete(idx);
+        return next;
+      });
       try {
         // Local-first: if the chapter has been downloaded into the
         // library entry, read its content.json from disk and rewrite
@@ -307,15 +335,52 @@ export function SourceStreamReader({
           items = await sourceLinesToChapterItems(lines, source);
         }
         cacheRef.current.set(idx, items);
+        devLog("fetch:done", { idx, items: items.length });
         setBook((prev) => spliceChapter(prev, idx, items!));
-        setChapterLoading(false);
       } catch (e) {
-        setChapterError(e instanceof Error ? e.message : String(e));
-        setChapterLoading(false);
+        const message = e instanceof Error ? e.message : String(e);
+        devLog("fetch:error", { idx, message });
+        setChapterErrors((prev) => new Map(prev).set(idx, message));
+      } finally {
+        setInFlight((prev) => {
+          if (!prev.has(idx)) return prev;
+          const next = new Set(prev);
+          next.delete(idx);
+          return next;
+        });
       }
     },
     [source, flat, libraryEntryId],
   );
+
+  // Resolve the next chapter's availability whenever the position moves. A
+  // chapter already in the session cache is instant; otherwise ask the disk,
+  // since a downloaded chapter opens without a round trip and an undownloaded
+  // one does not.
+  useEffect(() => {
+    if (!book) return;
+    const next = currentChapter + 1;
+    if (next >= book.chapters.length) {
+      setNextAvailability(undefined);
+      return;
+    }
+    if (cacheRef.current.has(next)) {
+      setNextAvailability("device");
+      return;
+    }
+    const stub = flat[next];
+    if (!libraryEntryId || !stub) {
+      setNextAvailability("online");
+      return;
+    }
+    let cancelled = false;
+    void chapterIsDownloaded(libraryEntryId, stub.sourceId).then((on) => {
+      if (!cancelled) setNextAvailability(on ? "device" : "online");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [book, currentChapter, flat, libraryEntryId]);
 
   // Fetch on chapter change + prefetch the next one in the background.
   useEffect(() => {
@@ -480,9 +545,12 @@ export function SourceStreamReader({
   };
 
   const currentItems = book.chapters[currentChapter]?.paragraphs ?? [];
-  const showChapterLoading = chapterLoading && currentItems.length === 0;
-  const showChapterError =
-    chapterError !== null && currentItems.length === 0;
+  const overlay = chapterOverlay(
+    currentChapter,
+    currentItems.length,
+    inFlight,
+    chapterErrors,
+  );
 
   return (
     <div
@@ -519,6 +587,7 @@ export function SourceStreamReader({
           onUpdateHighlightNote={onUpdateHighlightNote}
           onJumpToHighlight={onJumpToHighlight}
           tocVolumes={tocVolumes}
+          nextChapterAvailability={nextAvailability}
           onBack={onClose}
         />
       ) : (
@@ -540,19 +609,19 @@ export function SourceStreamReader({
           onUpdateHighlightNote={onUpdateHighlightNote}
           onJumpToHighlight={onJumpToHighlight}
           tocVolumes={tocVolumes}
+          nextChapterAvailability={nextAvailability}
           activePanel={activePanel}
           setActivePanel={setActivePanel}
           onBack={onClose}
         />
       )}
 
-      {showChapterLoading && (
-        <ChapterLoadingOverlay theme={theme} />
-      )}
-      {showChapterError && (
+      {overlay.kind === "loading" && <ChapterLoadingOverlay theme={theme} />}
+      <OverlayLog kind={overlay.kind} chapter={currentChapter} items={currentItems.length} />
+      {overlay.kind === "error" && (
         <ChapterErrorOverlay
           theme={theme}
-          message={chapterError ?? ""}
+          message={overlay.message}
           onRetry={() => {
             cacheRef.current.delete(currentChapter);
             void fetchChapter(currentChapter);
@@ -562,6 +631,23 @@ export function SourceStreamReader({
       )}
     </div>
   );
+}
+
+/** Dev-only: records which overlay is up, so the log distinguishes "blank" from
+ *  "loading spinner showing". Renders nothing. */
+function OverlayLog({
+  kind,
+  chapter,
+  items,
+}: {
+  kind: string;
+  chapter: number;
+  items: number;
+}) {
+  useEffect(() => {
+    devLog("overlay", { kind, chapter, items });
+  }, [kind, chapter, items]);
+  return null;
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
