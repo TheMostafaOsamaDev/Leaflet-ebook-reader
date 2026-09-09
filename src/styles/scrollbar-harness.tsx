@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "./global.css";
 import { THEMES, type ThemeKey } from "./tokens";
+import { setReduceMotionOverride } from "./motion";
 import { installOverlayScrollbar } from "./overlayScrollbar";
 
 const KEYS: ThemeKey[] = ["sepia", "light", "dark", "oled"];
@@ -30,6 +31,7 @@ function Harness() {
   const [key, setKey] = useState<ThemeKey>(
     (new URLSearchParams(location.search).get("theme") as ThemeKey) ?? "sepia",
   );
+  const [panelMounted, setPanelMounted] = useState(true);
   const theme = THEMES[key];
 
   useEffect(() => {
@@ -56,6 +58,26 @@ function Harness() {
             {k}
           </button>
         ))}
+        {/* The app-level Reduce motion control, so the controller can be
+            checked against it and not just the OS query. */}
+        {(["auto", "on", "off"] as const).map((v) => (
+          <button
+            key={v}
+            data-testid={`rm-${v}`}
+            onClick={() => setReduceMotionOverride(v)}
+            style={{ display: "block", margin: "4px 0", width: "100%" }}
+          >
+            motion: {v}
+          </button>
+        ))}
+        {/* Unmounts a scroll area, to check its thumb is reclaimed. */}
+        <button
+          data-testid="drop-panel"
+          onClick={() => setPanelMounted(false)}
+          style={{ display: "block", margin: "12px 0 0", width: "100%" }}
+        >
+          drop panel
+        </button>
       </div>
 
       {/* A full-height page column, like the library or settings. */}
@@ -86,6 +108,7 @@ function Harness() {
 
       {/* A small rounded panel, like a dialog body or the TOC. */}
       <div style={{ flex: "0 0 320px", padding: 24 }}>
+        {panelMounted && (
         <div
           data-testid="panel"
           style={{
@@ -97,6 +120,7 @@ function Harness() {
         >
           <Rows n={30} prefix="Panel" />
         </div>
+        )}
 
         {/* Opted out: a container that draws its own bar must get no overlay
             one, or the reader would show two bars side by side. */}

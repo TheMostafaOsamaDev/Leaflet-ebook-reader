@@ -327,13 +327,8 @@ textarea::placeholder {
 }
 
 /* Scrollbars — the native bar is hidden app-wide and replaced by our own
-   overlay thumb (styles/overlayScrollbar.ts).
-
-   Why not style `::-webkit-scrollbar`: the engines ignore `transition` on
-   scrollbar pseudo-elements (so a thumb that's transparent at rest snaps out
-   instead of fading), a native gutter is always flush to the container edge
-   (so the bar can't be inset), and the pseudo-elements render differently on
-   Android WebView / WKWebView. See the module header for the full reasoning.
+   overlay thumb. See styles/overlayScrollbar.ts for why the pseudo-element
+   route can't produce it.
 
    Hiding the bar also reclaims the 8px gutter this used to reserve, so
    content is that much wider — the overlay thumb floats over it instead. */
@@ -356,21 +351,23 @@ textarea::placeholder {
   z-index: 2147483000;
 }
 
-/* The invisible grab strip. Wider than the bar it holds, so a 4px bar is
-   still catchable with a mouse. Positioned by the controller via transform;
-   `top`/`left` stay at 0 so the transform is the whole position. */
+/* The invisible grab strip, wider than the bar it holds so a 4px bar is still
+   catchable with a mouse. Positioned by the controller via transform, so
+   `top`/`left` stay at 0. Its width and the bar's come from `BAR` in JS — the
+   geometry is derived from the same numbers, so a CSS copy could drift the
+   bar off its own grab strip. No `will-change`: the engines already promote a
+   layer for the duration of a running transform/opacity transition, and a
+   static hint would pin one per strip for the whole session. */
 #riwaq-scrollbars .riwaq-sb-strip {
   position: absolute;
   top: 0;
   left: 0;
   display: flex;
   justify-content: center;
-  width: 14px; /* BAR.hit */
   opacity: 0;
   pointer-events: none;
   touch-action: none;
   cursor: grab;
-  will-change: transform, opacity;
 }
 #riwaq-scrollbars .riwaq-sb-strip:active {
   cursor: grabbing;
@@ -380,9 +377,7 @@ textarea::placeholder {
    with the translucency carried by the strip's opacity — so the same bar
    reads correctly on a sepia page and on OLED black. */
 #riwaq-scrollbars .riwaq-sb-bar {
-  width: 4px; /* BAR.width */
   height: 100%;
-  border-radius: 4px;
   background: var(--sb-thumb, #6f5a3d);
 }
 
@@ -407,13 +402,11 @@ textarea::placeholder {
   }
 }
 
-/* These three used to be the only places a native bar was suppressed, back
-   when the app styled `::-webkit-scrollbar` and reserved an 8px gutter
-   everywhere else. The rule at the top of this file now hides the native bar
-   app-wide, so they are kept only as markers of intent on the surfaces that
-   carry them — reading columns, the sidebar nav, and horizontal pill rows.
-   The declarations are belt-and-braces for any context that skips the
-   universal rule (e.g. a harness with its own reset). */
+/* Redundant since the universal rule above: these three say exactly what it
+   already says, for a subset of elements. Kept only so their ~11 call sites
+   don't become dangling class names; removing both together is a follow-up
+   that touches components unrelated to the scrollbar. Don't reach for them in
+   new code — nothing needs to opt out of a bar that no longer exists. */
 .no-scrollbar,
 .riwaq-scroll-hidden {
   scrollbar-width: none;

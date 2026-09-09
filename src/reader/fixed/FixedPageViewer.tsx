@@ -20,8 +20,6 @@ import {
   useState,
 } from "react";
 import { readingSurfaces, type Theme, type ThemeKey } from "../../styles/tokens";
-import { EASE } from "../../styles/motion";
-import { BAR } from "../../styles/overlayScrollbar";
 import type { Highlight } from "../../store/library";
 import { resolveDocxSelection, type DocxSelectionAnchor } from "./docxHighlight";
 import {
@@ -374,8 +372,6 @@ export const FixedPageViewer = forwardRef<
   // a page-wide overflow and the drag gets mistaken for panning a zoomed page.
   const overflowX = useRef(0);
   const peekHostRef = useRef<HTMLDivElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
-  const barIdle = useRef<number | null>(null);
 
   // Live mirrors the subscribe-once wheel listener reads without re-subscribing.
   const currentRef = useRef(current);
@@ -1344,67 +1340,10 @@ export const FixedPageViewer = forwardRef<
   );
   dropOverlayRef.current = dropOverlayFor;
 
-  // ---- Floating scrollbar ---------------------------------------------------
-
-  const updateBar = useCallback(() => {
-    const el = scrollRef.current;
-    const bar = barRef.current;
-    if (!el || !bar) return;
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    if (scrollHeight <= clientHeight + 2) {
-      bar.style.opacity = "0";
-      return;
-    }
-    // Track geometry comes from `BAR` (not the page's PAD) so this bar matches
-    // the app-wide overlay one — see styles/overlayScrollbar.ts.
-    const trackH = clientHeight - BAR.pad * 2;
-    const thumbH = Math.max(
-      BAR.minThumb,
-      (clientHeight / scrollHeight) * trackH,
-    );
-    const top = (scrollTop / (scrollHeight - clientHeight)) * (trackH - thumbH);
-    bar.style.height = `${thumbH}px`;
-    bar.style.transform = `translateY(${BAR.pad + Math.max(0, top)}px)`;
-  }, []);
-
-  const flashBar = useCallback(() => {
-    const el = scrollRef.current;
-    const bar = barRef.current;
-    if (!el || !bar || el.scrollHeight <= el.clientHeight + 2) return;
-    bar.style.opacity = String(BAR.rest);
-    if (barIdle.current) window.clearTimeout(barIdle.current);
-    barIdle.current = window.setTimeout(() => {
-      if (barRef.current) barRef.current.style.opacity = "0";
-    }, BAR.idleMs);
-  }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    let raf = 0;
-    const onScroll = () => {
-      flashBar();
-      if (raf) return;
-      raf = window.requestAnimationFrame(() => {
-        raf = 0;
-        updateBar();
-      });
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      if (raf) window.cancelAnimationFrame(raf);
-    };
-  }, [updateBar, flashBar]);
-
-  useEffect(() => {
-    updateBar();
-  }, [updateBar, container.w, container.h, current, layout, flow]);
-
   useEffect(
     () => () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      for (const t of [idleTimer, turnTimer, holdTimer, barIdle]) {
+      for (const t of [idleTimer, turnTimer, holdTimer]) {
         if (t.current) window.clearTimeout(t.current);
       }
       if (peekRaf.current) window.cancelAnimationFrame(peekRaf.current);
@@ -1538,9 +1477,6 @@ export const FixedPageViewer = forwardRef<
       <div
         ref={scrollRef}
         className="no-scrollbar"
-        // This viewer draws its own floating bar (below), so the app-wide
-        // overlay one must not paint a second one over the same container.
-        data-no-overlay-scrollbar
         onClick={flow === "paged" ? onPagedClick : undefined}
         onMouseMove={flow === "paged" ? onPagedMove : undefined}
         style={{
@@ -1668,25 +1604,6 @@ export const FixedPageViewer = forwardRef<
         </div>
       )}
 
-      {/* Floating scrollbar — driven imperatively (no re-render), fades out ~0.8s
-          after scrolling stops. */}
-      <div
-        ref={barRef}
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: 0,
-          insetInlineEnd: BAR.inset,
-          width: BAR.width,
-          height: BAR.minThumb,
-          borderRadius: BAR.width,
-          background: theme.muted,
-          opacity: 0,
-          transition: `opacity ${BAR.fadeOutMs}ms ${EASE.out}`,
-          pointerEvents: "none",
-          zIndex: 6,
-        }}
-      />
     </div>
   );
 });

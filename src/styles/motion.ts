@@ -54,31 +54,47 @@ export function setReduceMotionOverride(pref: "auto" | "on" | "off"): void {
   reduceMotionListeners.forEach((listener) => listener());
 }
 
+const osReducedQuery = (): MediaQueryList | null =>
+  typeof window === "undefined" || !window.matchMedia
+    ? null
+    : window.matchMedia("(prefers-reduced-motion: reduce)");
+
+/** The reduce-motion preference right now: the app-level override, or the OS
+ *  setting when the override is `"auto"`.
+ *
+ *  The non-React half of `useReducedMotion`, for modules that run outside the
+ *  component tree. Without it they can only read the OS query and silently
+ *  ignore the in-app Reduce motion control, which is a setting the user
+ *  expects to govern the whole app. */
+export function isReducedMotion(): boolean {
+  if (reduceMotionOverride !== "auto") return reduceMotionOverride === "on";
+  return osReducedQuery()?.matches ?? false;
+}
+
+/** Call `onChange` whenever `isReducedMotion()` would return something new —
+ *  from the settings override or from the OS. Returns an unsubscribe. */
+export function subscribeReducedMotion(onChange: () => void): () => void {
+  reduceMotionListeners.add(onChange);
+  const mq = osReducedQuery();
+  mq?.addEventListener("change", onChange);
+  return () => {
+    reduceMotionListeners.delete(onChange);
+    mq?.removeEventListener("change", onChange);
+  };
+}
+
 /** React to the reduce-motion preference. Returns `true` when the user has
  *  asked for less motion — either via the app-level override or (when the
  *  override is `"auto"`) the OS setting — in which case callers should skip
  *  enter/exit animations (a `display: none` toggle is fine). */
 export function useReducedMotion(): boolean {
-  const [osReduced, setOsReduced] = useState(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return false;
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  });
-  const [override, setOverride] = useState(reduceMotionOverride);
+  const [reduced, setReduced] = useState(isReducedMotion);
   useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const handler = (e: MediaQueryListEvent) => setOsReduced(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    const sync = () => setReduced(isReducedMotion());
+    const unsubscribe = subscribeReducedMotion(sync);
+    // Resync in case the preference changed between render and subscribe.
+    sync();
+    return unsubscribe;
   }, []);
-  useEffect(() => {
-    const listener = () => setOverride(reduceMotionOverride);
-    reduceMotionListeners.add(listener);
-    // Resync in case the override changed between render and subscribe.
-    listener();
-    return () => {
-      reduceMotionListeners.delete(listener);
-    };
-  }, []);
-  return override === "on" ? true : override === "off" ? false : osReduced;
+  return reduced;
 }
