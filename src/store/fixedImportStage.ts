@@ -77,8 +77,7 @@ export type FixedSource =
 export async function stageFixedImport(
   source: FixedSource,
   filename: string,
-  /** Format the caller already sniffed. Omitted by callers holding a real
-   *  filename (the dev harness), where the bytes still decide. */
+  /** Format the caller already sniffed. When omitted, the bytes decide. */
   kind?: "pdf" | "docx",
   staged?: StagedSource,
 ): Promise<FixedImportDraft> {
@@ -143,9 +142,9 @@ async function stagePdf(
     defaultCoverId: candidates[0]?.id ?? null,
     commit: async ({ title, cover }) => {
       const chosen = await resolveCover(cover, candidates);
-      // Without a staged file there is nothing on disk to rename into place,
-      // so the bytes are the only way to persist the original. The app always
-      // stages; only the dev harness takes the bytes branch.
+      // Without a staged file there is nothing on disk to rename into
+      // place, so the bytes are the only way to persist the original. Every
+      // in-tree caller stages, so this branch is a fallback only.
       const fallbackBytes = "bytes" in source ? source.bytes : null;
       if (!staged && !fallbackBytes) {
         throw new Error("cannot commit a PDF without a staged file or bytes");

@@ -61,8 +61,8 @@ export interface PdfDoc {
  *
  *  The path form never materializes the file in JS — pdf.js pulls the ranges
  *  it needs through Rust (see rangeSource.ts), which is what keeps a 200 MB
- *  book from costing ~400 MB of webview heap. The bytes form is for the dev
- *  harness and tests, which hold a buffer and no Tauri. */
+ *  book from costing ~400 MB of webview heap. The bytes form is for tests,
+ *  which hold a buffer and no Tauri. */
 export type PdfSource = Uint8Array | { path: string; length: number };
 
 export async function openPdfDocument(source: PdfSource): Promise<PdfDoc> {

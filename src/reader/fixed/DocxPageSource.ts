@@ -32,8 +32,8 @@ const FONT_SIZE = 17;
 const LINE_HEIGHT = 1.7;
 
 interface DocxParts {
-  /** Body HTML with `<img>` srcs already resolved to loadable URLs
-   *  (asset:// in the app, blob: in the dev harness). */
+  /** Body HTML with `<img>` srcs already resolved to loadable
+   *  asset:// URLs. */
   html: string;
   dir: "ltr" | "rtl";
   outline: { title: string; level: number; anchorId: string }[];
@@ -45,8 +45,8 @@ const IMG_CONSTRAIN = (img: HTMLImageElement) => {
   img.style.height = "auto";
 };
 
-/** Core paginator — runs in any browser (no Tauri). Used by the app (via
- *  createDocxPageSource) and directly by the dev harness. */
+/** Core paginator — runs in any browser (no Tauri), which is what keeps it
+ *  testable. Used by the app via createDocxPageSource. */
 export async function createDocxPageSourceFromParts(
   parts: DocxParts,
 ): Promise<FixedPageSource> {

@@ -44,8 +44,8 @@ export function newFixedId(prefix: string): string {
  *  The original arrives one of two ways. `stagedPath` means the native import
  *  pass already streamed it to disk, so we just rename it into place — no
  *  bytes cross the IPC bridge, which is what makes a 200 MB PDF importable on
- *  Android at all (see `nativeStaging.ts`). `bytes` is the in-memory fallback
- *  used by the dev harness. */
+ *  Android at all (see `nativeStaging.ts`). `bytes` is the in-memory
+ *  fallback, kept for callers that never touch disk. */
 export async function commitPdfBook(
   opts: {
     title: string;

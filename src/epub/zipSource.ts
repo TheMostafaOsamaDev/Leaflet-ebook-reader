@@ -123,9 +123,8 @@ export async function openNativeZip(
 // ── in-memory (JSZip) ──────────────────────────────────────────────────────
 
 /**
- * Wrap a zip that only exists as bytes in JS. Used by the dev harness and by
- * tests; the app's own import paths stage to disk first so they can use
- * `openNativeZip` instead.
+ * Wrap a zip that only exists as bytes in JS. Used by tests; the app's own
+ * import paths stage to disk first so they can use `openNativeZip` instead.
  */
 export async function openMemoryZip(
   bytes: ArrayBuffer | Uint8Array,
