@@ -3,8 +3,7 @@
 // PanelShell, the shared SettingsSection primitives), with a FixedPageViewer in
 // the center instead of reflowable text. Only the center differs by format; the
 // shell is identical. The page source is created via a `createSource` factory
-// so this component is agnostic to disk-vs-bytes loading (App passes a disk
-// source; the dev harness passes an in-memory one).
+// so this component is agnostic to how the pages were loaded.
 //
 // Panel presentation matches the EPUB readers exactly: desktop slides a
 // SideSheet in over the viewer, mobile raises the same MobileSheet bottom

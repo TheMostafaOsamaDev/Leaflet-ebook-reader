@@ -12,7 +12,7 @@
 // bottom lines half-cut and the eye's anchor drifting by fractions of a line,
 // while a flick moved 230-460 lines a second — a blur rather than a scroll.
 //
-// Two independent fixes, measured separately in reader/wheel-harness.tsx:
+// Two independent fixes, measured separately against the real line box:
 //
 //   easing    glides to the target instead of applying each delta whole.
 //             Worst single-frame movement 209px -> 55px.
@@ -88,9 +88,8 @@ export interface LineBank {
  * Quantising each event on its own does not work, and fails in the worst
  * possible way: this machine's slow scroll is 13px, which rounds to zero whole
  * lines, and since the glide keeps the frame loop alive the next event rounds
- * from the same unmoved target and also gives zero — for ever. Measured in the
- * harness before the fix: twelve slow notches moved the page 0px where native
- * moved 156px. Banking the remainder means the reader's total travel is
+ * from the same unmoved target and also gives zero — for ever. Measured before
+ * the fix: twelve slow notches moved the page 0px where native moved 156px. Banking the remainder means the reader's total travel is
  * preserved to the pixel while only the resting position is on a line.
  */
 export function createLineBank(): LineBank {

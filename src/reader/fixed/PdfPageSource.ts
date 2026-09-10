@@ -86,14 +86,6 @@ export async function createPdfPageSource(
   return createPdfPageSourceFrom(await openPdfDocument({ path, length: info.size }));
 }
 
-/** Build a page source directly from PDF bytes — used by the dev harness,
- *  which has a buffer and no Tauri to stream through. */
-export async function createPdfPageSourceFromBytes(
-  bytes: Uint8Array,
-): Promise<FixedPageSource> {
-  return createPdfPageSourceFrom(await openPdfDocument(bytes));
-}
-
 async function createPdfPageSourceFrom(doc: PdfDoc): Promise<FixedPageSource> {
   const sizeCache = new Map<number, { w: number; h: number }>();
   // Insertion-ordered so the first key is the oldest — cheap LRU.
@@ -140,9 +132,9 @@ async function createPdfPageSourceFrom(doc: PdfDoc): Promise<FixedPageSource> {
     // creation, so they can only be reached from a stylesheet). The container's
     // own geometry is set here instead: it is structural — the layer has to sit
     // exactly over the canvas for a selection's rects to mean anything — and
-    // leaving it to a global stylesheet meant anything rendering a page without
-    // importing global.css (the dev harness) laid the layer out in flow BELOW
-    // the page, doubling the wrap's height and putting every glyph elsewhere.
+    // leaving it to a global stylesheet meant anything rendering a page
+    // without importing global.css laid the layer out in flow BELOW the page,
+    // doubling the wrap's height and putting every glyph elsewhere.
     text.className = "textLayer";
     text.style.cssText =
       "position:absolute; inset:0; overflow:clip; line-height:1; " +
