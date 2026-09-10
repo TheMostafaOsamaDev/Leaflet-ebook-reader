@@ -136,8 +136,31 @@ export const THEMES: Record<ThemeKey, Theme> = {
   },
 };
 
-export type HighlightColor = "yellow" | "blue" | "pink" | "green";
+/** PERSISTED on every stored highlight, so these four keys can never be
+ *  renamed or removed — "yellow" | "blue" | "pink" | "green" shipped
+ *  first and old books still carry them. New hues are only ever added.
+ *
+ *  Declared in hue-wheel order, which is the order the selection
+ *  toolbar's swatch rail scrolls through. */
+export type HighlightColor =
+  | "yellow"
+  | "orange"
+  | "red"
+  | "pink"
+  | "purple"
+  | "blue"
+  | "teal"
+  | "green";
 
+/** `light`/`dark` are the tint laid UNDER the text, so they stay low-alpha
+ *  — the ink has to win. `dot` is the saturated mid used for the swatch
+ *  itself and for the spine on a highlight card, where it is drawn on the
+ *  chrome rather than behind words.
+ *
+ *  The whole family is desaturated towards the warm paper the reader is
+ *  set on; fully-saturated tints turn Arabic text muddy at these alphas.
+ *  Hues are spaced around the wheel so two neighbours never read as the
+ *  same marker under a paragraph. */
 export const HIGHLIGHT_COLORS: Record<
   HighlightColor,
   { light: string; dark: string; dot: string }
@@ -147,15 +170,38 @@ export const HIGHLIGHT_COLORS: Record<
     dark: "rgba(232,197,78,0.26)",
     dot: "#d4a84a",
   },
-  blue: {
-    light: "rgba(120,160,210,0.32)",
-    dark: "rgba(120,160,210,0.28)",
-    dot: "#6b8cb5",
+  orange: {
+    light: "rgba(226,150,80,0.30)",
+    dark: "rgba(226,150,80,0.26)",
+    dot: "#cf8f4e",
+  },
+  red: {
+    // Deliberately cooler than `orange` rather than a darker version of
+    // it: at these alphas a brick red and a tan read as the same marker
+    // under a paragraph, which defeats having both.
+    light: "rgba(206,88,88,0.28)",
+    dark: "rgba(206,88,88,0.26)",
+    dot: "#c25a5a",
   },
   pink: {
     light: "rgba(220,140,170,0.32)",
     dark: "rgba(220,140,170,0.28)",
     dot: "#c2708c",
+  },
+  purple: {
+    light: "rgba(178,150,210,0.30)",
+    dark: "rgba(178,150,210,0.28)",
+    dot: "#9c7bb5",
+  },
+  blue: {
+    light: "rgba(120,160,210,0.32)",
+    dark: "rgba(120,160,210,0.28)",
+    dot: "#6b8cb5",
+  },
+  teal: {
+    light: "rgba(110,180,175,0.30)",
+    dark: "rgba(110,180,175,0.26)",
+    dot: "#5f9d99",
   },
   green: {
     light: "rgba(140,180,130,0.32)",
@@ -164,10 +210,41 @@ export const HIGHLIGHT_COLORS: Record<
   },
 };
 
-export function hlBg(color: HighlightColor, themeKey: ThemeKey): string {
-  const isDark = themeKey === "dark" || themeKey === "oled";
-  return HIGHLIGHT_COLORS[color][isDark ? "dark" : "light"];
+/** The two themes whose paper is darker than their ink. Every per-theme
+ *  colour choice branches on this, so it is one predicate rather than
+ *  the same comparison written at each site. */
+export function isDarkTheme(themeKey: ThemeKey): boolean {
+  return themeKey === "dark" || themeKey === "oled";
 }
+
+export function hlBg(color: HighlightColor, themeKey: ThemeKey): string {
+  return HIGHLIGHT_COLORS[color][isDarkTheme(themeKey) ? "dark" : "light"];
+}
+
+/**
+ * The colour a note marker is drawn in — the bar in the margin beside an
+ * annotated passage, and the spine on the note popover itself. Lives
+ * beside `hlBg` because it is the same kind of thing: one palette entry
+ * resolved against the theme.
+ *
+ * Measured: the palette's `dot` untouched sits at 1.68:1 against its own
+ * tint on sepia paper, which is invisible for the one mark saying a note
+ * exists; 28% toward black takes the worst case to 3.11:1. On the dark
+ * themes that same darkening would hide it instead (pink falls to
+ * 1.81:1) while the untouched dot already clears 3:1, so those lift
+ * slightly. Anything drawing a note marker must come through here rather
+ * than reach for `dot`, or the marker and the popover disagree.
+ */
+export function hlMark(color: HighlightColor, themeKey: ThemeKey): string {
+  return shade(HIGHLIGHT_COLORS[color].dot, isDarkTheme(themeKey) ? 0.2 : -0.28);
+}
+
+/** Swatch order for any picker: the record's own declaration order,
+ *  which is the hue wheel. Derived rather than repeated, so a new hue is
+ *  one edit and cannot go missing from a picker. */
+export const HIGHLIGHT_COLOR_ORDER = Object.keys(
+  HIGHLIGHT_COLORS,
+) as readonly HighlightColor[];
 
 /** Every value `Tweaks.fontFamily` can hold.
  *
@@ -432,12 +509,25 @@ function toHex(rgb: [number, number, number]): string {
 }
 
 /** Move a colour `amount` (0..1) of the way toward black (negative) or white. */
-function shade(hex: string, amount: number): string {
+export function shade(hex: string, amount: number): string {
   const rgb = parseHexColor(hex);
   if (!rgb) return hex;
   const target = amount < 0 ? 0 : 255;
   const k = Math.abs(amount);
   return toHex(rgb.map((c) => c + (target - c) * k) as [number, number, number]);
+}
+
+/** The theme's ink at an arbitrary alpha.
+ *
+ *  For hairlines that have to hold contrast over a fill we do not
+ *  control — the edge of a highlight swatch, say. `rule` and
+ *  `ruleStrong` are fixed at 0.10-0.22, which measures under 3:1
+ *  against the palest swatches on the pale themes; 0.38 clears it on
+ *  all four. Returns the ink untouched if it is not a plain hex. */
+export function inkAlpha(theme: Theme, alpha: number): string {
+  const rgb = parseHexColor(theme.ink);
+  if (!rgb) return theme.ink;
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
 }
 
 /** How far the surround sits from the page. Small on purpose — enough to read
@@ -461,6 +551,7 @@ export interface ReadingSurfaces {
  *  The page is always the more elevated of the two. Normally that means
  *  recessing the surround; on a pure-black theme there is nothing below black
  *  to recess to, so the page is lifted instead. */
+
 export function readingSurfaces(theme: Theme): ReadingSurfaces {
   const rgb = parseHexColor(theme.paper);
   const nearBlack = !rgb || (rgb[0] + rgb[1] + rgb[2]) / 3 < 24;

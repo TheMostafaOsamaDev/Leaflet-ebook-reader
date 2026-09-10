@@ -1,250 +1,143 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
+import { SelectionNoteEditor } from "./SelectionNoteEditor";
+import { HighlightColorRail } from "./HighlightColorRail";
 import {
-  FONT_STACKS,
-  HIGHLIGHT_COLORS,
-  type HighlightColor,
-  type Theme,
-} from "../styles/tokens";
+  HighlightToolbar,
+  NoteFieldButton,
+  ToolbarDivider,
+  TOOLBAR_ROW_H,
+  type ToolbarAnchor,
+} from "./HighlightToolbar";
+import { FONT_STACKS, type HighlightColor, type Theme } from "../styles/tokens";
 import { useI18n } from "../i18n/useI18n";
-import type { MsgKey } from "../i18n";
 
 interface Props {
   theme: Theme;
-  /** Viewport-coordinate rect of the current selection; popover positions
-      itself relative to this. */
-  anchor: DOMRect;
-  /** "auto" (default): place above if there's room, else below.
-   *  "below": always below the selection — used on mobile so the
-   *  popover never overlaps Android's native floating toolbar that
-   *  sits above the selected text. */
-  placement?: "auto" | "below";
+  /** Where the toolbar sits and what it stays clear of. */
+  anchor: ToolbarAnchor;
   onPick: (color: HighlightColor) => void;
   onAddNote: (color: HighlightColor, note: string) => void;
+  /** Copy the selected passage. The reader owns this because it holds
+   *  the text; the toolbar only reports the tap and shows the
+   *  confirmation. */
+  onCopy: () => void;
   onDismiss: () => void;
 }
 
-const COLORS: HighlightColor[] = ["yellow", "blue", "pink", "green"];
 const DEFAULT_COLOR: HighlightColor = "yellow";
 
-/** Localized color name for the swatch aria-labels below. */
-const COLOR_NAME_KEY: Record<HighlightColor, MsgKey> = {
-  yellow: "color.yellow",
-  blue: "color.blue",
-  pink: "color.pink",
-  green: "color.green",
-};
+/** How long the Copy button stays confirmed before returning to its
+ *  resting label. Long enough to read, short enough that the toolbar is
+ *  usable again straight away. */
+const COPIED_MS = 1400;
 
 export function SelectionPopover({
   theme,
   anchor,
-  placement = "auto",
   onPick,
   onAddNote,
+  onCopy,
   onDismiss,
 }: Props) {
   const { tr } = useI18n();
   const [noteMode, setNoteMode] = useState(false);
+  // The colour a noted highlight will be painted in. Also the swatch
+  // shown as selected once the reader has expressed a preference.
   const [noteColor, setNoteColor] = useState<HighlightColor>(DEFAULT_COLOR);
+  // Kept across a trip back to the menu, so returning does not throw a
+  // half-written note away.
   const [note, setNote] = useState("");
+  const [copied, setCopied] = useState(false);
 
-  // Esc dismisses. Don't close on outside-click here — the parent owns
-  // the selection lifecycle and dismisses us when the selection clears.
+  // Esc backs out of the note editor first and only dismisses from the
+  // menu, so a stray keypress cannot destroy a note being written.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDismiss();
+      if (e.key !== "Escape") return;
+      if (noteMode) {
+        e.stopPropagation();
+        setNoteMode(false);
+      } else {
+        onDismiss();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+  }, [noteMode, onDismiss]);
 
-  // Position above the selection; flip below if there isn't room or
-  // when the caller explicitly requested below (mobile path — see
-  // the `placement` prop). The anchor rect is in viewport coords, so
-  // `position: fixed` keeps the popover stable even if the underlying
-  // scroll container moves.
-  const margin = 8;
-  const estimatedHeight = noteMode ? 132 : 44;
-  const fitsAbove =
-    placement === "auto" && anchor.top - estimatedHeight - margin > 8;
-  const top = fitsAbove
-    ? anchor.top - estimatedHeight - margin
-    : anchor.bottom + margin;
-  const center = anchor.left + anchor.width / 2;
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), COPIED_MS);
+    return () => window.clearTimeout(t);
+  }, [copied]);
 
   return (
-    <div
-      role="toolbar"
-      aria-label={tr("selection.ariaLabel")}
-      data-popover="highlight"
-      onMouseDown={(e) => {
-        // Keep the underlying selection alive while the user clicks our
-        // controls — without this, mousedown on the popover collapses
-        // the selection before we can read its anchor.
-        e.preventDefault();
-      }}
-      style={{
-        position: "fixed",
-        top,
-        left: center,
-        transform: "translateX(-50%)",
-        zIndex: 9000,
-        padding: noteMode ? "10px 12px" : "6px 8px",
-        background: theme.bg,
-        color: theme.ink,
-        border: `0.5px solid ${theme.rule}`,
-        borderRadius: 10,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-        fontFamily: FONT_STACKS.sans,
-        display: "flex",
-        flexDirection: noteMode ? "column" : "row",
-        alignItems: noteMode ? "stretch" : "center",
-        gap: 8,
-        minWidth: noteMode ? 260 : undefined,
-      }}
+    <HighlightToolbar
+      theme={theme}
+      anchor={anchor}
+      dialog={noteMode}
+      label={tr(noteMode ? "selection.noteAriaLabel" : "selection.ariaLabel")}
     >
-      {!noteMode ? (
-        <>
-          {COLORS.map((c) => (
-            <button
-              key={c}
-              onClick={() => onPick(c)}
-              aria-label={tr("selection.colorAriaLabel", { color: tr(COLOR_NAME_KEY[c]) })}
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 11,
-                border: "none",
-                background: HIGHLIGHT_COLORS[c].dot,
-                cursor: "pointer",
-                padding: 0,
-              }}
-            />
-          ))}
-          <div
-            style={{
-              width: 1,
-              height: 18,
-              background: theme.rule,
-              margin: "0 2px",
-            }}
-          />
-          <button
-            onClick={() => setNoteMode(true)}
-            aria-label={tr("highlights.addNote")}
-            title={tr("highlights.addNote")}
-            style={{
-              width: 28,
-              height: 28,
-              border: "none",
-              borderRadius: 6,
-              background: "transparent",
-              color: theme.ink,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Icon name="pencil" size={14} />
-          </button>
-        </>
+      {noteMode ? (
+        <SelectionNoteEditor
+          theme={theme}
+          color={noteColor}
+          note={note}
+          onColor={setNoteColor}
+          onNote={setNote}
+          onBack={() => setNoteMode(false)}
+          onSave={() => onAddNote(noteColor, note)}
+        />
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                onClick={() => setNoteColor(c)}
-                aria-label={tr("selection.colorPickAriaLabel", { color: tr(COLOR_NAME_KEY[c]) })}
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 9,
-                  border:
-                    c === noteColor
-                      ? `2px solid ${theme.ink}`
-                      : "2px solid transparent",
-                  background: HIGHLIGHT_COLORS[c].dot,
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              />
-            ))}
-          </div>
-          <textarea
-            autoFocus
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                onAddNote(noteColor, note);
-              }
-            }}
-            placeholder={tr("highlights.whyMatterPlaceholder")}
-            rows={3}
-            style={{
-              width: "100%",
-              background: theme.chrome,
-              color: theme.ink,
-              border: `0.5px solid ${theme.rule}`,
-              borderRadius: 6,
-              padding: "6px 8px",
-              fontSize: 12,
-              fontFamily: FONT_STACKS.sans,
-              outline: "none",
-              resize: "vertical",
-              minHeight: 60,
-            }}
-          />
-          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          {/* No selection ring here: in the menu a swatch paints the
+              passage the moment it is tapped, so none of them is a
+              "current" colour waiting to be confirmed. */}
+          <HighlightColorRail theme={theme} onPick={onPick} />
+          <div style={{ height: 1, background: theme.rule }} />
+          <div
+            style={{ display: "flex", alignItems: "stretch", height: TOOLBAR_ROW_H }}
+          >
+            {/* One third / two thirds, per the design: copy is one word,
+                the note field wants room to read as a field. */}
             <button
               onClick={() => {
-                setNoteMode(false);
-                setNote("");
+                onCopy();
+                setCopied(true);
               }}
-              style={ghostBtn(theme)}
+              aria-label={tr("selection.copy")}
+              style={{
+                flex: "0 0 33.333%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 5,
+                border: "none",
+                background: "transparent",
+                color: copied ? theme.ink : theme.chromeInk,
+                cursor: "pointer",
+                fontFamily: FONT_STACKS.sans,
+                fontSize: 12.5,
+                fontWeight: 500,
+                padding: 0,
+                whiteSpace: "nowrap",
+                transition: "color 160ms ease-out",
+              }}
             >
-              {tr("common.cancel")}
+              {copied && <Icon name="check" size={13} />}
+              <span>{tr(copied ? "selection.copied" : "selection.copy")}</span>
             </button>
-            <button
-              onClick={() => onAddNote(noteColor, note)}
-              style={primaryBtn(theme)}
-            >
-              {tr("common.save")}
-            </button>
+            <ToolbarDivider theme={theme} />
+            <NoteFieldButton
+              theme={theme}
+              label={note.trim() || tr("selection.writeNote")}
+              filled={note.trim().length > 0}
+              onClick={() => setNoteMode(true)}
+            />
           </div>
         </>
       )}
-    </div>
+    </HighlightToolbar>
   );
-}
-
-function ghostBtn(theme: Theme): React.CSSProperties {
-  return {
-    padding: "5px 10px",
-    border: `0.5px solid ${theme.rule}`,
-    borderRadius: 6,
-    background: "transparent",
-    color: theme.ink,
-    fontSize: 11.5,
-    fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: FONT_STACKS.sans,
-  };
-}
-
-function primaryBtn(theme: Theme): React.CSSProperties {
-  return {
-    padding: "5px 10px",
-    border: "none",
-    borderRadius: 6,
-    background: theme.ink,
-    color: theme.bg,
-    fontSize: 11.5,
-    fontWeight: 600,
-    cursor: "pointer",
-    fontFamily: FONT_STACKS.sans,
-  };
 }

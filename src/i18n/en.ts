@@ -315,6 +315,8 @@ export const en = {
   "highlights.editNote": "Edit note",
   "highlights.notePlaceholder": "Note…",
   "highlights.actions": "Highlight actions",
+  "highlights.deleteConfirm": "Delete?",
+  "highlights.deleteShort": "Delete",
   "highlights.delete": "Delete highlight",
   // Shared by SelectionPopover.tsx (new highlight) and
   // HighlightActionPopover.tsx (existing highlight) — the longer note
@@ -328,10 +330,19 @@ export const en = {
   "selection.ariaLabel": "Highlight options",
   "selection.colorAriaLabel": "Highlight {color}",
   "selection.colorPickAriaLabel": "Color {color}",
+  "selection.copy": "Copy",
+  "selection.copied": "Copied",
+  "selection.writeNote": "Write a note …",
+  "selection.colorsAriaLabel": "Highlight colours",
+  "selection.noteAriaLabel": "Note on the selected passage",
   "color.yellow": "yellow",
   "color.blue": "blue",
   "color.pink": "pink",
   "color.green": "green",
+  "color.orange": "orange",
+  "color.red": "red",
+  "color.purple": "purple",
+  "color.teal": "teal",
 
   // Progress overlay (heading reuses reader.readingProgress)
   "progress.ofBook": "of book",

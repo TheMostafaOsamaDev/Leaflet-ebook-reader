@@ -20,7 +20,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import { DEFAULT_TWEAKS } from "../hooks/useTweaks";
 import { THEMES } from "../styles/tokens";
 import type { EpubBook } from "../epub/types";
-import type { BookState } from "../store/library";
+import type { BookState, Highlight } from "../store/library";
 import type { ActivePanel, Tweaks } from "../types/reader";
 import "../styles/global.css";
 
@@ -58,11 +58,18 @@ function Harness() {
   const [chapter, setChapter] = useState(0);
   const [panel, setPanel] = useState<ActivePanel>(null);
 
+  // Highlights are live here, not stubbed out. The docking layout is
+  // what this rig is for, but the paginated reader is also the only
+  // place the note bars can be seen doing their job — BookBody inside
+  // PaginatedView's CSS columns, where "the margin" is a column gap
+  // rather than the page edge. See components/NoteSpines.
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+
   const state: BookState = {
     bookId: book.id,
     currentChapter: chapter,
     paragraphIndex: 0,
-    highlights: [],
+    highlights,
   };
 
   return (
@@ -78,9 +85,22 @@ function Harness() {
       jumpNonce={0}
       onChapterChange={setChapter}
       onParagraphChange={() => {}}
-      onCreateHighlight={() => {}}
-      onDeleteHighlight={() => {}}
-      onUpdateHighlightNote={() => {}}
+      onCreateHighlight={(h) =>
+        setHighlights((prev) => [
+          ...prev,
+          { ...h, id: crypto.randomUUID(), ts: Date.now() },
+        ])
+      }
+      onDeleteHighlight={(id) =>
+        setHighlights((prev) => prev.filter((h) => h.id !== id))
+      }
+      onUpdateHighlightNote={(id, note) =>
+        setHighlights((prev) =>
+          prev.map((h) =>
+            h.id === id ? { ...h, note: note.trim() || undefined } : h,
+          ),
+        )
+      }
       onJumpToHighlight={() => {}}
       activePanel={panel}
       setActivePanel={setPanel}

@@ -9,12 +9,20 @@
 import { BaseDirectory, stat } from "@tauri-apps/plugin-fs";
 import { openPdfDocument, type PdfDoc } from "../../pdf/pdfjs";
 import { bookDir, type Highlight, type PdfBook } from "../../store/library";
-import { hlBg, type ThemeKey } from "../../styles/tokens";
+import { hlBg, hlMark, type ThemeKey } from "../../styles/tokens";
+
 import type { FixedPageSource } from "./FixedPageSource";
 
 const BASE = BaseDirectory.AppData;
 // Never evict below this: the page on screen, the one sliding in, and one
 // neighbour. Dropping any of those guarantees a rasterization mid-turn.
+/** Where the note bar sits in the page margin, as a share of the page
+ *  width. A page's own margin is part of its bitmap and is proportional
+ *  to it — typically 5-10% — so 1.6% in lands on paper rather than on
+ *  the words, at any page size or zoom. */
+const MARGIN_BAR_INSET = 1.6;
+const MARGIN_BAR_WIDTH = 0.45;
+
 const MIN_MOUNTED = 3;
 // Hard ceiling on the number of live canvases, independent of their size —
 // a backstop for pages small enough that the byte budget alone wouldn't bite.
@@ -168,6 +176,30 @@ async function createPdfPageSourceFrom(doc: PdfDoc): Promise<FixedPageSource> {
           `background:${hlBg(hl.color, curThemeKey)}; mix-blend-mode:multiply; ` +
           `border-radius:2px;`;
         m.marks.appendChild(el);
+      }
+      // A bar in the page margin saying this highlight has a note, the
+      // same mark the reflowable reader puts there. Nothing needs
+      // measuring: the rects are already normalized to the page, so the
+      // run's extent is arithmetic, and everything stays correct through
+      // a zoom because it is all percentages.
+      if (hl.note?.trim() && hl.fixed.rects.length > 0) {
+        let top = Infinity;
+        let bottom = -Infinity;
+        for (const r of hl.fixed.rects) {
+          if (r.y < top) top = r.y;
+          if (r.y + r.h > bottom) bottom = r.y + r.h;
+        }
+        const bar = document.createElement("div");
+        bar.setAttribute("aria-hidden", "true");
+        bar.style.cssText =
+          // Logical, so an RTL book puts it in the right-hand margin.
+          // The inset is a share of the page, not pixels: a PDF page's
+          // own margin is part of the bitmap and is proportional to it.
+          `position:absolute; inset-inline-start:${MARGIN_BAR_INSET}%; ` +
+          `top:${top * 100}%; height:${(bottom - top) * 100}%; ` +
+          `width:${MARGIN_BAR_WIDTH}%; border-radius:1px; pointer-events:none; ` +
+          `background:${hlMark(hl.color, curThemeKey)};`;
+        m.marks.appendChild(bar);
       }
     }
   }
