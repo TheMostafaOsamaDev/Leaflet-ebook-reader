@@ -1,4 +1,12 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { isImageItem, type ChapterItem, type EpubChapter } from "../epub/types";
 import { chapterImageSrcFor, type Highlight } from "../store/library";
 import { ensureEpubImages } from "../store/epubImages";
@@ -13,6 +21,8 @@ import {
   type ThemeKey,
 } from "../styles/tokens";
 import { useFontScale } from "../hooks/useFontScale";
+import { NoteSpines } from "./NoteSpines";
+import { useNoteSpines } from "../hooks/useNoteSpines";
 
 /** Horizontal gutter for the reading surface, derived from the content-width
  *  setting.
@@ -170,24 +180,30 @@ export function BookBody({
   // to chapter.paragraphs[i] resolve to the same paragraph after filtering.
   // Image items at index 0 always pass through — those are figures, not
   // duplicate titles.
-  const normalizedTitle = chapter.title.trim().toLowerCase();
-  const paragraphs = chapter.paragraphs
-    .map((p, originalIndex) => ({ p, originalIndex }))
-    .filter(({ p, originalIndex }) => {
-      if (originalIndex !== 0) return true;
-      if (isImageItem(p)) return true;
-      return p.text.trim().toLowerCase() !== normalizedTitle;
-    });
+  const paragraphs = useMemo(() => {
+    const normalizedTitle = chapter.title.trim().toLowerCase();
+    return chapter.paragraphs
+      .map((p, originalIndex) => ({ p, originalIndex }))
+      .filter(({ p, originalIndex }) => {
+        if (originalIndex !== 0) return true;
+        if (isImageItem(p)) return true;
+        return p.text.trim().toLowerCase() !== normalizedTitle;
+      });
+  }, [chapter]);
 
   // Bucket the chapter's highlights by paragraph index once so each
-  // paragraph render is O(matches) instead of O(highlights).
-  const highlightsByParagraph = new Map<number, Highlight[]>();
-  for (const h of highlights) {
-    if (h.chapter !== chapter.order) continue;
-    const list = highlightsByParagraph.get(h.paragraphIndex) ?? [];
-    list.push(h);
-    highlightsByParagraph.set(h.paragraphIndex, list);
-  }
+  // paragraph render is O(matches) instead of O(highlights). Memoised
+  // because the reader re-renders on things that touch neither.
+  const highlightsByParagraph = useMemo(() => {
+    const byParagraph = new Map<number, Highlight[]>();
+    for (const h of highlights) {
+      if (h.chapter !== chapter.order) continue;
+      const list = byParagraph.get(h.paragraphIndex) ?? [];
+      list.push(h);
+      byParagraph.set(h.paragraphIndex, list);
+    }
+    return byParagraph;
+  }, [highlights, chapter.order]);
 
   return (
     <div
@@ -282,27 +298,85 @@ export function BookBody({
             />
           </figure>
         ) : (
-          <p
+          <TextParagraph
             key={originalIndex}
-            data-p-index={originalIndex}
-            style={{
-              margin: `0 0 ${paragraphSpacing}em`,
-              ...(hyphenation
-                ? { hyphens: "auto", WebkitHyphens: "auto" as const }
-                : null),
-            }}
-          >
-            {renderParagraph(
-              p.text,
-              highlightsByParagraph.get(originalIndex) ?? [],
-              themeKey,
-            )}
-          </p>
+            index={originalIndex}
+            text={p.text}
+            highlights={highlightsByParagraph.get(originalIndex) ?? NO_HIGHLIGHTS}
+            themeKey={themeKey}
+            spacing={paragraphSpacing}
+            hyphenation={hyphenation}
+          />
         ),
       )}
     </div>
   );
 }
+
+/**
+ * One paragraph of the book, and the note bars beside it.
+ *
+ * It is a component rather than inline JSX because the bars have to be
+ * measured against something, and that something is this paragraph: it
+ * is their containing block, which is what lets them sit in the margin
+ * in the scrolling reader and inside a CSS column in the paginated one
+ * without either knowing about the other. See NoteSpines.
+ */
+const TextParagraph = memo(function TextParagraph({
+  index,
+  text,
+  highlights,
+  themeKey,
+  spacing,
+  hyphenation,
+}: {
+  index: number;
+  text: string;
+  highlights: Highlight[];
+  themeKey: ThemeKey;
+  spacing: number;
+  hyphenation: boolean;
+}) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  // Most paragraphs have no highlights at all, so this bails before
+  // allocating anything: it runs for every paragraph on every render.
+  const noteIds = useMemo(
+    () =>
+      highlights.length === 0
+        ? NO_IDS
+        : highlights.filter((h) => h.note).map((h) => h.id),
+    [highlights],
+  );
+  const spines = useNoteSpines(ref, noteIds, [text, spacing, hyphenation]);
+
+  return (
+    <p
+      ref={ref}
+      data-p-index={index}
+      style={{
+        margin: `0 0 ${spacing}em`,
+        // Containing block for the note bars. Costs nothing on its own
+        // and does not affect the text.
+        position: noteIds.length > 0 ? "relative" : undefined,
+        ...(hyphenation
+          ? { hyphens: "auto", WebkitHyphens: "auto" as const }
+          : null),
+      }}
+    >
+      {renderParagraph(text, highlights, themeKey)}
+      <NoteSpines
+        spines={spines}
+        colorOf={(id) => highlights.find((h) => h.id === id)?.color}
+        themeKey={themeKey}
+      />
+    </p>
+  );
+});
+
+/** Shared empty arrays. A fresh `[]` per paragraph per render would be
+ *  N allocations and would also make every memo boundary miss. */
+const NO_IDS: string[] = [];
+const NO_HIGHLIGHTS: Highlight[] = [];
 
 /** Slice a paragraph's plain text into alternating plain segments and
  *  <mark> spans for each highlight. Highlights are rendered in document
@@ -325,6 +399,9 @@ function renderParagraph(
         <mark
           key={h.id}
           data-h-id={h.id}
+          // What a reader's cursor is really asking about when it
+          // stops on a highlight.
+          title={h.note}
           style={{
             background: hlBg(h.color, themeKey),
             color: "inherit",

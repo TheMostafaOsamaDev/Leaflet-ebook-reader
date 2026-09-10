@@ -35,8 +35,12 @@ import {
 } from "../styles/tokens";
 import {
   anchorFromRange,
+  rangeForSegments,
+  rectForMark,
+  rectForSegments,
   type SelectionAnchor,
 } from "../lib/selectionAnchor";
+import { copySelection } from "../lib/clipboard";
 import { useI18n } from "../i18n/useI18n";
 import { formatNum } from "../i18n";
 import { HighlightsPanel } from "../panels/HighlightsPanel";
@@ -149,6 +153,20 @@ function buildRange(a: RangeEndpoint, b: RangeEndpoint): Range {
   }
   return range;
 }
+/** Sub-pixel churn is not worth a render. */
+function sameRect(a: DOMRect, b: DOMRect): boolean {
+  return (
+    Math.abs(a.x - b.x) < 0.5 &&
+    Math.abs(a.y - b.y) < 0.5 &&
+    Math.abs(a.width - b.width) < 0.5 &&
+    Math.abs(a.height - b.height) < 0.5
+  );
+}
+
+function sameRects(a: DOMRect[], b: DOMRect[]): boolean {
+  return a.length === b.length && a.every((r, i) => sameRect(r, b[i]));
+}
+
 function computeHandleRects(range: Range): { start: DOMRect; end: DOMRect } {
   const start = document.createRange();
   start.setStart(range.startContainer, range.startOffset);
@@ -242,6 +260,12 @@ function mobileTab(theme: Theme): CSSProperties {
     justifyContent: "center",
   };
 }
+
+/** The phone reader's own chrome. Its reading column is padded 44px at
+ *  each end (see the scroller below); the desktop's 66/65 bars are a
+ *  different shape, and clamping a toolbar to the wrong ones parks it
+ *  inside the text. */
+const MOBILE_READING_INSETS = { top: 44, bottom: 44 };
 
 export function MobileReader({
   theme,
@@ -688,8 +712,13 @@ export function MobileReader({
 
   // Handle-drag effect: tracks pointer movement after the user grabs
   // one of the start/end handles and extends the selection range.
+  // Depends on whether handles are up, NOT on where they are: the
+  // scroll-sync below rewrites their rects every frame, and keying this
+  // to the rects tore down and re-registered three document-level
+  // pointer listeners each time.
+  const handlesUp = handleRects !== null;
   useEffect(() => {
-    if (!handleRects) return;
+    if (!handlesUp) return;
 
     const onMove = (e: PointerEvent) => {
       if (
@@ -750,7 +779,56 @@ export function MobileReader({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onUp);
     };
-  }, [handleRects]);
+  }, [handlesUp]);
+
+  // Keep the custom selection's paint glued to the text while the
+  // reader scrolls with a selection live. BookBody uses touch-action:
+  // pan-y, so a one-finger scroll during selection is normal — and
+  // every rect here was snapshotted in viewport coords at gesture
+  // time, which left the boxes, the handles and the toolbar sitting
+  // over whatever text scrolled under them.
+  //
+  // Everything is re-derived from the stored paragraph offsets, so this
+  // never reaches into the gesture state above. If the paragraphs have
+  // gone (chapter turned), the rects are left alone and the dismissal
+  // paths take over.
+  useEffect(() => {
+    if (!selAnchor) return;
+    let frame = 0;
+    const sync = () => {
+      frame = 0;
+      const range = rangeForSegments(selAnchor.segments);
+      if (!range) return;
+      const rects = Array.from(range.getClientRects()).map(
+        (r) => new DOMRect(r.x, r.y, r.width, r.height),
+      );
+      const handles = computeHandleRects(range);
+      // Identity guards: without them every frame committed two fresh
+      // objects and re-rendered the whole reader, including BookBody,
+      // even when the text had not actually moved.
+      setSelRects((prev) => (sameRects(prev, rects) ? prev : rects));
+      setHandleRects((prev) =>
+        prev &&
+        sameRect(prev.start, handles.start) &&
+        sameRect(prev.end, handles.end)
+          ? prev
+          : handles,
+      );
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(sync);
+    };
+    window.addEventListener("scroll", schedule, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener("resize", schedule);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+    };
+  }, [selAnchor]);
 
   // All popover dismissal flows through clicks: tap an existing
   // highlight to open its action popover, tap outside everything to
@@ -1210,10 +1288,14 @@ export function MobileReader({
           )}
           <SelectionPopover
             theme={theme}
-            anchor={selAnchor.rect}
-            placement="below"
+            anchor={{
+              getAnchor: () => rectForSegments(selAnchor.segments),
+              placement: "below",
+              insets: MOBILE_READING_INSETS,
+            }}
             onPick={(color) => createFromSelection(color)}
             onAddNote={(color, note) => createFromSelection(color, note)}
+            onCopy={() => copySelection(selAnchor)}
             onDismiss={dismissSelection}
           />
         </>
@@ -1221,8 +1303,12 @@ export function MobileReader({
       {activeHl && (
         <HighlightActionPopover
           theme={theme}
+          themeKey={themeKey}
           highlight={activeHl.highlight}
-          anchor={activeHl.rect}
+          anchor={{
+            getAnchor: () => rectForMark(activeHl.highlight.id),
+            insets: MOBILE_READING_INSETS,
+          }}
           onDelete={() => {
             onDeleteHighlight(activeHl.highlight.id);
             setActiveHl(null);

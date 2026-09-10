@@ -1,21 +1,44 @@
 import { useEffect, useState } from "react";
-import { Icon } from "./Icon";
+import { SelectionNoteEditor } from "./SelectionNoteEditor";
+import {
+  HighlightToolbar,
+  NoteFieldButton,
+  ToolbarDivider,
+  TOOLBAR_ROW_H,
+  type ToolbarAnchor,
+} from "./HighlightToolbar";
 import type { Highlight } from "../store/library";
-import { FONT_STACKS, type Theme } from "../styles/tokens";
+import { FONT_STACKS, hlMark, type Theme, type ThemeKey } from "../styles/tokens";
 import { useI18n } from "../i18n/useI18n";
+import { Icon } from "./Icon";
 
 interface Props {
   theme: Theme;
+  themeKey: ThemeKey;
   highlight: Highlight;
-  /** Viewport rect of the clicked <mark> element. */
-  anchor: DOMRect;
+  anchor: ToolbarAnchor;
   onDelete: () => void;
   onUpdateNote: (note: string) => void;
   onDismiss: () => void;
 }
 
+/** Past this the note scrolls rather than growing the popover into a
+ *  wall over the page. */
+const NOTE_MAX_H = 132;
+
+/**
+ * What a highlight shows when you tap it.
+ *
+ * With a note, that is the note — read first, then the row of things
+ * you can do to it. Without one, it is just the row, and the note field
+ * is an invitation rather than a record. Either way the bottom row is
+ * laid out like the selection toolbar's: the same thirds, the same
+ * field-shaped button, because this is the same highlight one step
+ * later in its life.
+ */
 export function HighlightActionPopover({
   theme,
+  themeKey,
   highlight,
   anchor,
   onDelete,
@@ -25,164 +48,149 @@ export function HighlightActionPopover({
   const { tr } = useI18n();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(highlight.note ?? "");
+  // Deleting a highlight you have written against throws the writing
+  // away, and there is no undo to catch it. So that delete asks first.
+  // A bare highlight is one tap to remake, so that one does not.
+  const [confirming, setConfirming] = useState(false);
+
+  // Reset when pointed at a different highlight. Both pieces of state
+  // above are seeded from props, and a `useState` initialiser does not
+  // re-run — so without this the popover would open on a second
+  // highlight showing the first one's draft, and with its delete
+  // already armed. Doing it here rather than asking every call site
+  // for a `key` keeps the component correct however it is mounted.
+  const [shownId, setShownId] = useState(highlight.id);
+  if (shownId !== highlight.id) {
+    setShownId(highlight.id);
+    setDraft(highlight.note ?? "");
+    setEditing(false);
+    setConfirming(false);
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDismiss();
+      if (e.key !== "Escape") return;
+      // Back out one layer at a time: out of the editor, out of the
+      // confirm, and only then out of the popover.
+      if (editing) {
+        e.stopPropagation();
+        setEditing(false);
+        setDraft(highlight.note ?? "");
+      } else if (confirming) {
+        e.stopPropagation();
+        setConfirming(false);
+      } else {
+        onDismiss();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+  }, [editing, confirming, highlight.note, onDismiss]);
 
-  const margin = 8;
-  const estimatedHeight = editing ? 130 : 40;
-  const fitsAbove = anchor.top - estimatedHeight - margin > 8;
-  const top = fitsAbove
-    ? anchor.top - estimatedHeight - margin
-    : anchor.bottom + margin;
-  const center = anchor.left + anchor.width / 2;
+  const hasNote = Boolean(highlight.note?.trim());
 
   return (
-    <div
-      role="toolbar"
-      aria-label={tr("highlights.actions")}
-      data-popover="highlight"
-      onMouseDown={(e) => {
-        // Same trick as SelectionPopover — keep focus/selection state
-        // stable while clicking inside this toolbar.
-        e.preventDefault();
-      }}
-      style={{
-        position: "fixed",
-        top,
-        left: center,
-        transform: "translateX(-50%)",
-        zIndex: 9000,
-        padding: editing ? "10px 12px" : "4px 6px",
-        background: theme.bg,
-        color: theme.ink,
-        border: `0.5px solid ${theme.rule}`,
-        borderRadius: 10,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-        fontFamily: FONT_STACKS.sans,
-        display: "flex",
-        flexDirection: editing ? "column" : "row",
-        alignItems: editing ? "stretch" : "center",
-        gap: editing ? 8 : 2,
-        minWidth: editing ? 260 : undefined,
-      }}
+    <HighlightToolbar
+      theme={theme}
+      anchor={anchor}
+      dialog={editing}
+      label={tr(editing ? "highlights.editNote" : "highlights.actions")}
     >
-      {!editing ? (
-        <>
-          <button
-            onClick={() => setEditing(true)}
-            aria-label={highlight.note ? tr("highlights.editNote") : tr("highlights.addNote")}
-            title={highlight.note ? tr("highlights.editNote") : tr("highlights.addNote")}
-            style={iconBtn(theme)}
-          >
-            <Icon name="pencil" size={14} />
-          </button>
-          <button
-            onClick={onDelete}
-            aria-label={tr("highlights.delete")}
-            title={tr("highlights.delete")}
-            style={{ ...iconBtn(theme), color: "#c66" }}
-          >
-            <Icon name="close" size={14} />
-          </button>
-        </>
+      {editing ? (
+        <SelectionNoteEditor
+          theme={theme}
+          note={draft}
+          onNote={setDraft}
+          // No rail: the colour of an existing highlight is not this
+          // screen's business, and offering a choice we cannot store
+          // would be a lie.
+          onBack={() => {
+            setEditing(false);
+            setDraft(highlight.note ?? "");
+          }}
+          onSave={() => onUpdateNote(draft)}
+        />
       ) : (
         <>
-          <textarea
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                onUpdateNote(draft);
-              }
-            }}
-            placeholder={tr("highlights.whyMatterPlaceholder")}
-            rows={3}
-            style={{
-              width: "100%",
-              background: theme.chrome,
-              color: theme.ink,
-              border: `0.5px solid ${theme.rule}`,
-              borderRadius: 6,
-              padding: "6px 8px",
-              fontSize: 12,
-              fontFamily: FONT_STACKS.sans,
-              outline: "none",
-              resize: "vertical",
-              minHeight: 60,
-            }}
-          />
+          {hasNote && (
+            <div
+              style={{
+                maxHeight: NOTE_MAX_H,
+                overflowY: "auto",
+                padding: "10px 12px",
+                // The same spine, in the same colour, that marks this
+                // highlight out in the margin — so the mark and the
+                // thing it opens read as one object.
+                borderInlineStart: `3px solid ${hlMark(highlight.color, themeKey)}`,
+                fontSize: 13,
+                lineHeight: 1.7,
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {highlight.note}
+            </div>
+          )}
+          <div style={{ height: 1, background: theme.rule }} />
           <div
-            style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}
+            style={{ display: "flex", alignItems: "stretch", height: TOOLBAR_ROW_H }}
           >
             <button
               onClick={() => {
-                setEditing(false);
-                setDraft(highlight.note ?? "");
+                if (hasNote && !confirming) {
+                  setConfirming(true);
+                  return;
+                }
+                onDelete();
               }}
-              style={ghostBtn(theme)}
+              aria-label={tr(
+                confirming ? "highlights.deleteConfirm" : "highlights.delete",
+              )}
+              style={{
+                flex: confirming ? 1 : "0 0 33.333%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 5,
+                border: "none",
+                background: confirming ? theme.danger : "transparent",
+                color: confirming ? theme.bg : theme.danger,
+                cursor: "pointer",
+                fontFamily: FONT_STACKS.sans,
+                fontSize: 12.5,
+                fontWeight: confirming ? 600 : 500,
+                padding: 0,
+                whiteSpace: "nowrap",
+                transition: "background 160ms ease-out, color 160ms ease-out",
+              }}
             >
-              {tr("common.cancel")}
+              <Icon name="trash" size={13} />
+              {/* Short label, full sentence for the screen reader: the
+                  visible text has a third of 268px to live in. */}
+              <span>
+                {tr(
+                  confirming
+                    ? "highlights.deleteConfirm"
+                    : "highlights.deleteShort",
+                )}
+              </span>
             </button>
-            <button
-              onClick={() => onUpdateNote(draft)}
-              style={primaryBtn(theme)}
-            >
-              {tr("common.save")}
-            </button>
+            {!confirming && (
+              <>
+                <ToolbarDivider theme={theme} />
+                <NoteFieldButton
+                  theme={theme}
+                  label={tr(
+                    hasNote ? "highlights.editNote" : "selection.writeNote",
+                  )}
+                  filled={hasNote}
+                  onClick={() => setEditing(true)}
+                />
+              </>
+            )}
           </div>
         </>
       )}
-    </div>
+    </HighlightToolbar>
   );
-}
-
-function iconBtn(theme: Theme): React.CSSProperties {
-  return {
-    width: 28,
-    height: 28,
-    border: "none",
-    borderRadius: 6,
-    background: "transparent",
-    color: theme.ink,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  };
-}
-
-function ghostBtn(theme: Theme): React.CSSProperties {
-  return {
-    padding: "5px 10px",
-    border: `0.5px solid ${theme.rule}`,
-    borderRadius: 6,
-    background: "transparent",
-    color: theme.ink,
-    fontSize: 11.5,
-    fontWeight: 500,
-    cursor: "pointer",
-    fontFamily: FONT_STACKS.sans,
-  };
-}
-
-function primaryBtn(theme: Theme): React.CSSProperties {
-  return {
-    padding: "5px 10px",
-    border: "none",
-    borderRadius: 6,
-    background: theme.ink,
-    color: theme.bg,
-    fontSize: 11.5,
-    fontWeight: 600,
-    cursor: "pointer",
-    fontFamily: FONT_STACKS.sans,
-  };
 }

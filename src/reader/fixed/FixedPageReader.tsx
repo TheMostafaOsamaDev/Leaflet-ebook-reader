@@ -46,6 +46,7 @@ import { PanelShell } from "../../panels/PanelShell";
 import { HighlightsPanel } from "../../panels/HighlightsPanel";
 import { SelectionPopover } from "../../components/SelectionPopover";
 import { HighlightActionPopover } from "../../components/HighlightActionPopover";
+import { copyText } from "../../lib/clipboard";
 import { SideSheet } from "../../components/SideSheet";
 import { MobileSheet } from "../../components/MobileSheet";
 import { ReaderTopBar } from "../chrome/ReaderTopBar";
@@ -707,9 +708,16 @@ export function FixedPageReader(props: FixedPageReaderProps) {
       {sel && (
         <SelectionPopover
           theme={theme}
-          anchor={sel.rect}
+          // Fixed pages turn, they don't scroll, so there is nothing
+          // for the toolbar to follow — it keeps the rect it opened
+          // with. (The reflowable readers pass a live re-measure.)
+          anchor={{
+            getAnchor: () => sel.rect,
+            insets: { top: CHROME_INSET_TOP, bottom: CHROME_INSET_BOTTOM },
+          }}
           onPick={(color) => createFromSelection(color)}
           onAddNote={(color, note) => createFromSelection(color, note)}
+          onCopy={() => copyText(sel.text)}
           onDismiss={() => setSel(null)}
         />
       )}
@@ -719,8 +727,12 @@ export function FixedPageReader(props: FixedPageReaderProps) {
           return hl ? (
             <HighlightActionPopover
               theme={theme}
+              themeKey={themeKey}
               highlight={hl}
-              anchor={activeHl.rect}
+              anchor={{
+                getAnchor: () => activeHl.rect,
+                insets: { top: CHROME_INSET_TOP, bottom: CHROME_INSET_BOTTOM },
+              }}
               onDelete={() => {
                 onDeleteHighlight(hl.id);
                 setActiveHl(null);

@@ -159,3 +159,88 @@ export function resolveSelectionAnchor(): SelectionAnchor | null {
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
   return anchorFromRange(sel.getRangeAt(0));
 }
+
+/** Inverse of `charOffsetWithin`: the (textNode, offset) pair that sits
+ *  `charOffset` characters into `paragraph`. Offsets past the end clamp
+ *  to the last text node, so a stale anchor degrades to a shorter range
+ *  instead of throwing IndexSizeError at the reader. */
+function endpointAt(
+  paragraph: HTMLElement,
+  charOffset: number,
+): { node: Node; offset: number } | null {
+  const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+  let pos = 0;
+  let last: { node: Node; offset: number } | null = null;
+  let t: Node | null;
+  while ((t = walker.nextNode())) {
+    const len = t.textContent?.length ?? 0;
+    if (charOffset <= pos + len) return { node: t, offset: charOffset - pos };
+    pos += len;
+    last = { node: t, offset: len };
+  }
+  return last;
+}
+
+/** The paragraph element for a stored index, within the mounted book
+ *  body. Null once that chapter/page is no longer rendered. */
+function paragraphElement(index: number): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    `[data-book-body] [data-p-index="${index}"]`,
+  );
+}
+
+/**
+ * Rebuild a live Range from a previously-resolved anchor's segments.
+ *
+ * This is how a popover keeps up with its text: the stored
+ * (paragraph, charStart, charEnd) description is stable, so re-measuring
+ * through it survives both scrolling and the paragraph being re-rendered
+ * with `<mark>` children. Re-reading `window.getSelection()` instead
+ * would not — focusing the note editor clobbers the document selection.
+ *
+ * Returns null when the paragraphs are no longer in the DOM.
+ */
+export function rangeForSegments(segments: SelectionSegment[]): Range | null {
+  if (segments.length === 0) return null;
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  const startP = paragraphElement(first.paragraphIndex);
+  const endP = paragraphElement(last.paragraphIndex);
+  if (!startP || !endP) return null;
+
+  const start = endpointAt(startP, first.charStart);
+  const end = endpointAt(endP, last.charEnd);
+  if (!start || !end) return null;
+
+  const range = document.createRange();
+  try {
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+  } catch {
+    return null;
+  }
+  return range;
+}
+
+/** Live viewport rect of a stored anchor, for popovers that follow
+ *  their text as the reading column scrolls. Null when the text is no
+ *  longer rendered. */
+export function rectForSegments(segments: SelectionSegment[]): DOMRect | null {
+  const range = rangeForSegments(segments);
+  if (!range) return null;
+  const rect = range.getBoundingClientRect();
+  // A zero rect means the range resolved but is not laid out (e.g. its
+  // page is display:none in the paginated view) — nothing to point at.
+  if (rect.width === 0 && rect.height === 0) return null;
+  return rect;
+}
+
+/** Live viewport rect of a persisted highlight's `<mark>`. Multi-segment
+ *  highlights render one mark per paragraph; the first is what the
+ *  action popover points at. */
+export function rectForMark(highlightId: string): DOMRect | null {
+  const el = document.querySelector<HTMLElement>(
+    `[data-h-id="${highlightId}"]`,
+  );
+  return el ? el.getBoundingClientRect() : null;
+}

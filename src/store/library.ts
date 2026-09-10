@@ -26,6 +26,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { FixedImportDraft } from "./fixedImportStage";
+import type { HighlightColor } from "../styles/tokens";
 import { isOpaqueUri, type BookFormat } from "./bookFormat";
 import { parseEpubFromSource } from "../epub/parser";
 import { openNativeZip } from "../epub/zipSource";
@@ -185,7 +186,10 @@ export interface Highlight {
   charEnd: number;
   text: string;
   note?: string;
-  color: "yellow" | "blue" | "pink" | "green";
+  /** One of the palette's keys. Kept as the shared type rather than a
+   *  second copy of the union, so adding a hue cannot leave the store
+   *  and the picker disagreeing. */
+  color: HighlightColor;
   ts: number;
   /** Fixed-layout anchor. Present ONLY on PDF/DOCX highlights — when set, the
    *  reflow fields above (chapter/paragraphIndex/charStart/charEnd) are unused

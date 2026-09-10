@@ -16,6 +16,7 @@ import { FONT_STACKS, type ThemeKey } from "../../styles/tokens";
 import type { TocEntry } from "../../types/reader";
 import type { FixedPageSource } from "./FixedPageSource";
 import { applyHighlightsToBlock, type BlockMark } from "./docxHighlight";
+import { paintDocxNoteSpines, type SpineTarget } from "./docxNoteSpines";
 
 const BASE = BaseDirectory.AppData;
 
@@ -125,6 +126,10 @@ export async function createDocxPageSourceFromParts(
   // fresh on every renderPage so a newly-created highlight shows on re-render.
   let curHighlights: Highlight[] = [];
   let curThemeKey: ThemeKey = "light";
+  /** Tears down the note bars' reflow observer. A page is rebuilt on
+   *  every turn, and an observer outliving its card would measure a
+   *  page that is gone. */
+  let cancelSpines: (() => void) | undefined;
 
   return {
     kind: "docx",
@@ -162,6 +167,7 @@ export async function createDocxPageSourceFromParts(
       card.querySelectorAll("img").forEach(IMG_CONSTRAIN);
       // Inject highlight <mark>s for any block on this page (before attaching,
       // so the mutation isn't visible mid-render).
+      const noted: SpineTarget[] = [];
       if (curHighlights.length > 0) {
         card.querySelectorAll<HTMLElement>("[data-block-id]").forEach((blockEl) => {
           const blockId = blockEl.getAttribute("data-block-id");
@@ -175,15 +181,31 @@ export async function createDocxPageSourceFromParts(
                 charEnd: hl.fixed.charEnd,
                 color: hl.color,
               });
+              if (hl.note?.trim()) {
+                noted.push({ id: hl.id, color: hl.color });
+                // Containing block for the note bar, set by the builder
+                // that owns this block's styling rather than patched on
+                // from the painter afterwards.
+                blockEl.style.position = "relative";
+              }
             }
           }
           if (marks.length) applyHighlightsToBlock(blockEl, marks, curThemeKey);
         });
       }
       host.replaceChildren(card);
+      // Note bars come AFTER attaching: a bar's position can only be
+      // measured once the card is in the document and its marks are
+      // laid out. The previous page's observer is dropped first.
+      cancelSpines?.();
+      cancelSpines =
+        noted.length > 0
+          ? paintDocxNoteSpines(card, noted, curThemeKey)
+          : undefined;
     },
     destroy() {
-      /* nothing persistent to release */
+      cancelSpines?.();
+      cancelSpines = undefined;
     },
   };
 }

@@ -49,9 +49,12 @@ import type { EpubBook } from "../epub/types";
 import type { BookState, Highlight } from "../store/library";
 import type { HighlightColor } from "../styles/tokens";
 import {
+  rectForMark,
+  rectForSegments,
   resolveSelectionAnchor,
   type SelectionAnchor,
 } from "../lib/selectionAnchor";
+import { copySelection } from "../lib/clipboard";
 import {
   FONT_STACKS,
   isRtlLanguage,
@@ -656,10 +659,22 @@ export function DesktopReader({
       // Defer one tick so the browser has finalized the selection.
       window.setTimeout(() => {
         const next = resolveSelectionAnchor();
-        if (next) {
-          setSelAnchor(next);
-          setActiveHl(null);
-        }
+        // Symmetric on purpose: this tick runs after the browser has
+        // settled the selection, which makes it the only honest moment
+        // to say whether a create-toolbar belongs on screen.
+        //
+        // Setting but never clearing here is what used to leave the
+        // toolbar floating over text the reader had just deselected.
+        // Clicking inside an existing selection keeps that selection
+        // alive all the way through mousedown, mouseup AND click — the
+        // browser holds it so text drag-and-drop stays possible — so
+        // the click handler below sees a live selection, takes its
+        // not-collapsed early return, and dismisses nothing. By the
+        // time this tick runs the selection is gone, and dropping that
+        // knowledge on the floor left the toolbar with nothing to
+        // point at.
+        setSelAnchor(next);
+        if (next) setActiveHl(null);
       }, 0);
     };
     document.addEventListener("pointerup", onPointerUp);
@@ -1185,17 +1200,29 @@ export function DesktopReader({
       {selAnchor && (
         <SelectionPopover
           theme={theme}
-          anchor={selAnchor.rect}
+          // Re-measured from the stored paragraph offsets rather than
+          // from window.getSelection(), so the toolbar keeps up with
+          // the text as the column scrolls — and keeps working while
+          // the note editor holds focus.
+          anchor={{
+            getAnchor: () => rectForSegments(selAnchor.segments),
+            insets: { top: CHROME_INSET_TOP, bottom: CHROME_INSET_BOTTOM },
+          }}
           onPick={(color) => createFromSelection(color)}
           onAddNote={(color, note) => createFromSelection(color, note)}
+          onCopy={() => copySelection(selAnchor)}
           onDismiss={dismissSelection}
         />
       )}
       {activeHl && (
         <HighlightActionPopover
           theme={theme}
+          themeKey={themeKey}
           highlight={activeHl.highlight}
-          anchor={activeHl.rect}
+          anchor={{
+            getAnchor: () => rectForMark(activeHl.highlight.id),
+            insets: { top: CHROME_INSET_TOP, bottom: CHROME_INSET_BOTTOM },
+          }}
           onDelete={() => {
             onDeleteHighlight(activeHl.highlight.id);
             setActiveHl(null);
