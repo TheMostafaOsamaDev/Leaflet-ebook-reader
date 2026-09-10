@@ -58,7 +58,7 @@ import {
   type PdfHighlightAnchor,
 } from "./store/library";
 import { MOTION, setReduceMotionOverride, useReducedMotion } from "./styles/motion";
-import { installScrollbarAutoHide } from "./styles/scrollbarAutoHide";
+import { installOverlayScrollbar } from "./styles/overlayScrollbar";
 import type { HighlightColor } from "./styles/tokens";
 import {
   FONT_READING_SANS,
@@ -210,16 +210,18 @@ function App() {
   useEffect(() => {
     document.body.style.background = theme.bg;
     document.body.style.color = theme.ink;
-    // Publish the theme-aware values that CSS pseudo-elements need (they
-    // can't read the inline `theme` object). global.css consumes these for
-    // `::placeholder` and the scrollbar so every input/scroll area themes in
-    // lock-step instead of relying on browser defaults (which render the
-    // placeholder as a bright tint of `ink` in dark mode — like pre-filled
-    // text — and leave a sepia-tinted scrollbar thumb on dark backgrounds).
+    // Publish the theme-aware values that plain CSS needs (it can't read the
+    // inline `theme` object). global.css consumes these for `::placeholder`
+    // and the overlay scrollbar so every input/scroll area themes in lock-step
+    // instead of relying on browser defaults (which render the placeholder as
+    // a bright tint of `ink` in dark mode — like pre-filled text).
+    //
+    // The bar takes `muted` rather than `ruleStrong`: it's a solid value, so
+    // the overlay's own opacity is free to carry the translucency (an
+    // alpha-baked colour can only ever get more opaque, never less).
     const root = document.documentElement.style;
     root.setProperty("--ph", theme.muted);
-    root.setProperty("--sb-thumb", theme.ruleStrong);
-    root.setProperty("--sb-thumb-hover", theme.muted);
+    root.setProperty("--sb-thumb", theme.muted);
     const meta = document.querySelector<HTMLMetaElement>(
       'meta[name="theme-color"]',
     );
@@ -238,12 +240,12 @@ function App() {
       darkIcons,
       background: theme.bg,
     }).catch(() => {});
-  }, [theme.bg, theme.ink, theme.muted, theme.ruleStrong, themeKey]);
+  }, [theme.bg, theme.ink, theme.muted, themeKey]);
 
-  // Overlay-scrollbar behaviour for every scroll area in the app: the thumb
-  // paints while scrolling and fades once it stops. One delegated listener,
-  // installed once — see styles/scrollbarAutoHide.ts.
-  useEffect(() => installScrollbarAutoHide(), []);
+  // Overlay scrollbars for every scroll area in the app: a slim, translucent
+  // bar that floats over the content while scrolling and fades once it stops.
+  // One delegated listener, installed once — see styles/overlayScrollbar.ts.
+  useEffect(() => installOverlayScrollbar(), []);
 
   // Apply the selectable UI (chrome) font through a CSS variable that
   // FONT_STACKS.sans falls back through. Set on documentElement so any

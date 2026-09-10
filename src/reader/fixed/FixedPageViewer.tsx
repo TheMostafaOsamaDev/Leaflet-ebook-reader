@@ -372,8 +372,6 @@ export const FixedPageViewer = forwardRef<
   // a page-wide overflow and the drag gets mistaken for panning a zoomed page.
   const overflowX = useRef(0);
   const peekHostRef = useRef<HTMLDivElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
-  const barIdle = useRef<number | null>(null);
 
   // Live mirrors the subscribe-once wheel listener reads without re-subscribing.
   const currentRef = useRef(current);
@@ -1342,62 +1340,10 @@ export const FixedPageViewer = forwardRef<
   );
   dropOverlayRef.current = dropOverlayFor;
 
-  // ---- Floating scrollbar ---------------------------------------------------
-
-  const updateBar = useCallback(() => {
-    const el = scrollRef.current;
-    const bar = barRef.current;
-    if (!el || !bar) return;
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    if (scrollHeight <= clientHeight + 2) {
-      bar.style.opacity = "0";
-      return;
-    }
-    const trackH = clientHeight - PAD * 2;
-    const thumbH = Math.max(28, (clientHeight / scrollHeight) * trackH);
-    const top = (scrollTop / (scrollHeight - clientHeight)) * (trackH - thumbH);
-    bar.style.height = `${thumbH}px`;
-    bar.style.transform = `translateY(${PAD + Math.max(0, top)}px)`;
-  }, []);
-
-  const flashBar = useCallback(() => {
-    const el = scrollRef.current;
-    const bar = barRef.current;
-    if (!el || !bar || el.scrollHeight <= el.clientHeight + 2) return;
-    bar.style.opacity = "0.5";
-    if (barIdle.current) window.clearTimeout(barIdle.current);
-    barIdle.current = window.setTimeout(() => {
-      if (barRef.current) barRef.current.style.opacity = "0";
-    }, 800);
-  }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    let raf = 0;
-    const onScroll = () => {
-      flashBar();
-      if (raf) return;
-      raf = window.requestAnimationFrame(() => {
-        raf = 0;
-        updateBar();
-      });
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      if (raf) window.cancelAnimationFrame(raf);
-    };
-  }, [updateBar, flashBar]);
-
-  useEffect(() => {
-    updateBar();
-  }, [updateBar, container.w, container.h, current, layout, flow]);
-
   useEffect(
     () => () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      for (const t of [idleTimer, turnTimer, holdTimer, barIdle]) {
+      for (const t of [idleTimer, turnTimer, holdTimer]) {
         if (t.current) window.clearTimeout(t.current);
       }
       if (peekRaf.current) window.cancelAnimationFrame(peekRaf.current);
@@ -1658,25 +1604,6 @@ export const FixedPageViewer = forwardRef<
         </div>
       )}
 
-      {/* Floating scrollbar — driven imperatively (no re-render), fades out ~0.8s
-          after scrolling stops. */}
-      <div
-        ref={barRef}
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: 0,
-          insetInlineEnd: 3,
-          width: 6,
-          height: 28,
-          borderRadius: 3,
-          background: theme.muted,
-          opacity: 0,
-          transition: "opacity 240ms ease",
-          pointerEvents: "none",
-          zIndex: 6,
-        }}
-      />
     </div>
   );
 });

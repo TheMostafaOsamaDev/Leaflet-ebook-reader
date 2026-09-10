@@ -1,14 +1,11 @@
-// A scroll container with Riwaq's own overlay scrollbar.
+// A scroll container whose bar is painted inside the container rather than by
+// the app-wide controller (styles/overlayScrollbar.ts — see it for why the bar
+// is a DOM thumb at all).
 //
-// Generalises the floating bar that FixedPageViewer already ships: a real DOM
-// thumb over a hidden native scrollbar, faded in while scrolling and out ~800ms
-// after it stops, with no track behind it.
-//
-// Why a DOM thumb instead of styling `::-webkit-scrollbar`: the pseudo-element
-// route renders differently per platform (WKWebView and Android WebView paint
-// overlay bars that ignore parts of the styling, and headless Chromium ignores
-// it outright), so its appearance can't be pinned down or tested. A DOM thumb
-// looks and behaves identically everywhere and can be verified.
+// The one thing it does that the controller can't: `alwaysVisible`, a bar that
+// stays painted instead of fading, which a short picker needs as its only cue
+// that there is more below the fold. That mode is the sole reason this
+// component still exists; folding it into the controller would retire it.
 //
 // The thumb is positioned imperatively through refs — scrolling must not push
 // React renders.
@@ -20,26 +17,12 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useReducedMotion } from "../styles/motion";
+import { EASE, useReducedMotion } from "../styles/motion";
+import { BAR, thumbGeometry } from "../styles/overlayScrollbar";
 
-/** Idle window before the thumb fades, matching FixedPageViewer's bar. */
-const IDLE_MS = 800;
-/** Inset from the container's top and bottom edges. */
-const PAD = 3;
-const THUMB_W = 5;
-const MIN_THUMB_H = 28;
-/** Opacity while visible — present but never loud over a page of text. */
-const VISIBLE = 0.45;
-/** How long the thumb takes to catch up to a new position.
- *
- *  Short on purpose. A wheel notch or a keyboard PageDown moves the content in
- *  one discrete jump, and without this the thumb teleports with it; easing the
- *  transform turns those steps into a glide. Push it much past ~150ms and the
- *  thumb visibly trails a continuous scroll instead of tracking it, which reads
- *  as lag rather than smoothness. Suppressed entirely while dragging the thumb
- *  — there, any easing means the bar lags the finger. */
-const GLIDE_MS = 120;
-const FADE_MS = 240;
+// Shape, timing and the placement maths all come from styles/overlayScrollbar,
+// so this bar and the app-wide one are the same bar. See that module for why
+// the numbers are what they are.
 
 export function ScrollArea({
   children,
@@ -70,39 +53,53 @@ export function ScrollArea({
   const raf = useRef(0);
   const reduced = useReducedMotion();
 
+  /** Local geometry for this thumb, or null when there's nothing to scroll.
+   *  The bar is laid out with `insetInlineEnd`, so only the vertical half of
+   *  the shared result is used — but going through it keeps the track, the
+   *  minimum height and the overscroll clamp identical to the app-wide bar,
+   *  and under its tests. */
+  const measure = useCallback((el: HTMLDivElement) => {
+    return thumbGeometry({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      top: 0,
+      left: 0,
+      width: el.clientWidth,
+      height: el.clientHeight,
+      direction: "ltr",
+    });
+  }, []);
+
   const place = useCallback(() => {
     const el = scrollRef.current;
     const thumb = thumbRef.current;
     if (!el || !thumb) return;
-    const { scrollTop, scrollHeight, clientHeight } = el;
+    const g = measure(el);
     // Nothing to scroll — keep the thumb out of the way entirely.
-    if (scrollHeight <= clientHeight + 2) {
+    if (!g) {
       thumb.style.opacity = "0";
       return;
     }
-    const trackH = clientHeight - PAD * 2;
-    const thumbH = Math.max(MIN_THUMB_H, (clientHeight / scrollHeight) * trackH);
-    const max = scrollHeight - clientHeight;
-    const top = max > 0 ? (scrollTop / max) * (trackH - thumbH) : 0;
-    thumb.style.height = `${thumbH}px`;
-    thumb.style.transform = `translateY(${PAD + Math.max(0, top)}px)`;
+    thumb.style.height = `${g.height}px`;
+    thumb.style.transform = `translateY(${g.top}px)`;
     // A persistent bar has no idle state to fade from, so paint it as soon as
     // there is something to scroll — including on first layout, before any
     // scroll event has fired.
-    if (alwaysVisible) thumb.style.opacity = String(VISIBLE);
-  }, [alwaysVisible]);
+    if (alwaysVisible) thumb.style.opacity = String(BAR.persistent);
+  }, [alwaysVisible, measure]);
 
   const flash = useCallback(() => {
     const el = scrollRef.current;
     const thumb = thumbRef.current;
-    if (!el || !thumb || el.scrollHeight <= el.clientHeight + 2) return;
-    thumb.style.opacity = String(VISIBLE);
+    if (!el || !thumb || !measure(el)) return;
+    thumb.style.opacity = String(alwaysVisible ? BAR.persistent : BAR.rest);
     if (alwaysVisible) return;
     if (idle.current) window.clearTimeout(idle.current);
     idle.current = window.setTimeout(() => {
       if (thumbRef.current) thumbRef.current.style.opacity = "0";
-    }, IDLE_MS);
-  }, [alwaysVisible]);
+    }, BAR.idleMs);
+  }, [alwaysVisible, measure]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -131,7 +128,7 @@ export function ScrollArea({
 
   const thumbTransition = reduced
     ? "none"
-    : `opacity ${FADE_MS}ms ease, transform ${GLIDE_MS}ms ease-out`;
+    : `opacity ${BAR.fadeOutMs}ms ${EASE.out}, transform ${BAR.glideMs}ms ${EASE.out}`;
 
   // Dragging the thumb. Without this a bar that is invisible at rest would be
   // unusable with a mouse: you could never grab it to drag.
@@ -147,9 +144,10 @@ export function ScrollArea({
       thumb.style.transition = "none";
       const startY = e.clientY;
       const startTop = el.scrollTop;
-      const trackH = el.clientHeight - PAD * 2;
-      const thumbH = thumb.getBoundingClientRect().height;
-      const travel = trackH - thumbH;
+      // Runway from the shared geometry, not the raw box, so the
+      // pointer-to-scroll mapping matches where the bar was actually painted.
+      const g = measure(el);
+      const travel = g ? g.track - g.height : 0;
 
       const move = (ev: PointerEvent) => {
         if (travel <= 0) return;
@@ -170,7 +168,7 @@ export function ScrollArea({
       thumb.addEventListener("pointerup", up);
       thumb.addEventListener("pointercancel", up);
     },
-    [flash, thumbTransition],
+    [flash, measure, thumbTransition],
   );
 
   return (
@@ -178,6 +176,9 @@ export function ScrollArea({
       <div
         ref={scrollRef}
         className="no-scrollbar"
+        // This component draws its own bar, so the app-wide overlay one must
+        // not paint a second one over the same container.
+        data-no-overlay-scrollbar
         style={{ overflowY: "auto", height: "100%", ...scrollStyle }}
       >
         {children}
@@ -189,10 +190,10 @@ export function ScrollArea({
         style={{
           position: "absolute",
           // Logical inset so the bar lands on the correct edge under dir=rtl.
-          insetInlineEnd: 2,
+          insetInlineEnd: BAR.inset,
           top: 0,
-          width: THUMB_W,
-          borderRadius: THUMB_W,
+          width: BAR.width,
+          borderRadius: BAR.width,
           background: color,
           opacity: 0,
           // No track element at all — the bar floats over the content.
